@@ -1,0 +1,638 @@
+import {
+  ArrowLeftRight,
+  Banknote,
+  Barcode,
+  CheckCircle2,
+  CreditCard,
+  Download,
+  Eye,
+  Minus,
+  Package,
+  Plus,
+  Printer,
+  Search,
+  ShoppingCart,
+  Trash2,
+  UserRound,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import logoImg from "../assets/logo.png";
+import { ReusableModal } from "../components/ReusableModal";
+import { useAuth } from "../context/AuthContext";
+import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
+import {
+  createCustomer,
+  getDefaultCustomer,
+  listCustomers,
+  updateCustomer,
+  type Customer,
+  type CustomerPayload,
+} from "../services/customerService";
+import { findProductByBarcode, listProducts } from "../services/productService";
+import { createSale } from "../services/saleService";
+import { getSettings, type BusinessSettings } from "../services/settingService";
+import type { CartItem, PaymentMethod, Product } from "../types/api";
+import { downloadReceiptPdf, openReceiptWindow, type ReceiptData } from "../utils/receipt";
+
+interface PaymentDraft {
+  method: PaymentMethod;
+  receivedAmount: number;
+  changeAmount: number;
+}
+
+const emptyCustomerForm: CustomerPayload = {
+  name: "",
+  document_number: "",
+  phone: "",
+  email: "",
+  address: "",
+};
+
+const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000/api").replace(/\/api\/?$/, "");
+
+function currency(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+function getProductImageUrl(product: Product): string | null {
+  if (!product.image_url) {
+    return null;
+  }
+  return product.image_url.startsWith("http") ? product.image_url : `${apiBaseUrl}${product.image_url}`;
+}
+
+function customerToPayload(customer: Customer): CustomerPayload {
+  return {
+    name: customer.name,
+    document_number: customer.document_number ?? "",
+    phone: customer.phone ?? "",
+    email: customer.email ?? "",
+    address: customer.address ?? "",
+  };
+}
+
+export function POSPage() {
+  const { fullName } = useAuth();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [defaultCustomer, setDefaultCustomer] = useState<Customer | null>(null);
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | "">("");
+  const [search, setSearch] = useState("");
+  const [stockFilter, setStockFilter] = useState<"ALL" | "AVAILABLE" | "LOW" | "OUT">("ALL");
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
+  const [cashReceived, setCashReceived] = useState("");
+  const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [loadingSale, setLoadingSale] = useState(false);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [customerForm, setCustomerForm] = useState<CustomerPayload>(emptyCustomerForm);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+
+  const loadProducts = useCallback(async () => {
+    setProducts(await listProducts(search));
+  }, [search]);
+
+  const loadCustomers = useCallback(async () => {
+    const [defaultRecord, records] = await Promise.all([getDefaultCustomer(), listCustomers()]);
+    const merged = records.some((customer) => customer.id === defaultRecord.id) ? records : [defaultRecord, ...records];
+    setDefaultCustomer(defaultRecord);
+    setCustomers(merged);
+    setSelectedCustomerId((current) => current || defaultRecord.id);
+  }, []);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  useEffect(() => {
+    getSettings()
+      .then(setBusinessSettings)
+      .catch(() => setMessage("No fue posible cargar la configuración del negocio."));
+  }, []);
+
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === selectedCustomerId) ?? null,
+    [customers, selectedCustomerId],
+  );
+
+  const visibleProducts = useMemo(() => {
+    return products.filter((product) => {
+      const stock = product.inventory?.quantity ?? 0;
+      if (stockFilter === "AVAILABLE") {
+        return stock > 0;
+      }
+      if (stockFilter === "LOW") {
+        return Boolean(product.inventory?.low_stock) && stock > 0;
+      }
+      if (stockFilter === "OUT") {
+        return stock <= 0;
+      }
+      return true;
+    });
+  }, [products, stockFilter]);
+
+  const subtotal = useMemo(
+    () => cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0),
+    [cart],
+  );
+  const taxPercentage = Number(businessSettings?.tax_percentage ?? 0);
+  const tax = subtotal * taxPercentage / 100;
+  const total = subtotal + tax;
+  const cashAmount = Number(cashReceived || 0);
+  const cashChange = Math.max(cashAmount - total, 0);
+
+  const addToCart = useCallback((product: Product) => {
+    const stock = product.inventory?.quantity ?? 0;
+    if (stock <= 0) {
+      setMessage("Este producto no tiene stock disponible.");
+      return;
+    }
+
+    setCart((current) => {
+      const existing = current.find((item) => item.product.id === product.id);
+      const currentQuantity = existing?.quantity ?? 0;
+      if (currentQuantity + 1 > stock) {
+        setMessage("No hay stock suficiente para agregar más unidades.");
+        return current;
+      }
+      if (existing) {
+        return current.map((item) =>
+          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item,
+        );
+      }
+      return [...current, { product, quantity: 1 }];
+    });
+  }, []);
+
+  const handleScan = useCallback(
+    async (barcodeValue: string) => {
+      try {
+        const product = await findProductByBarcode(barcodeValue);
+        addToCart(product);
+        setMessage(`${product.name} agregado por código de barras.`);
+      } catch {
+        setMessage("No se encontró un producto con ese código de barras.");
+      }
+    },
+    [addToCart],
+  );
+
+  const { barcodeBuffer, handleBarcodeChange } = useBarcodeScanner({ onScan: handleScan });
+
+  function changeQuantity(productId: number, delta: number) {
+    setCart((current) =>
+      current
+        .map((item) => {
+          if (item.product.id !== productId) {
+            return item;
+          }
+          const stock = item.product.inventory?.quantity ?? 0;
+          const nextQuantity = Math.min(stock, item.quantity + delta);
+          return { ...item, quantity: nextQuantity };
+        })
+        .filter((item) => item.quantity > 0),
+    );
+  }
+
+  function validateSale(): boolean {
+    if (cart.length === 0) {
+      setMessage("Agrega productos antes de registrar la venta.");
+      return false;
+    }
+    if (!selectedCustomer) {
+      setMessage("Selecciona un cliente antes de facturar.");
+      return false;
+    }
+    if (!businessSettings) {
+      setMessage("La configuración del negocio todavía no está disponible.");
+      return false;
+    }
+    const invalidStock = cart.find((item) => item.quantity > (item.product.inventory?.quantity ?? 0));
+    if (invalidStock) {
+      setMessage(`Stock insuficiente para ${invalidStock.product.name}.`);
+      return false;
+    }
+    return true;
+  }
+
+  function startCheckout() {
+    setMessage(null);
+    if (!validateSale()) {
+      return;
+    }
+    if (paymentMethod === "CASH") {
+      setCashReceived("");
+      setPaymentModalOpen(true);
+      return;
+    }
+    setPaymentDraft({ method: paymentMethod, receivedAmount: total, changeAmount: 0 });
+    setConfirmModalOpen(true);
+  }
+
+  function confirmCashPayment() {
+    if (cashAmount < total) {
+      setMessage("El valor recibido no puede ser menor al total de la venta.");
+      return;
+    }
+    setPaymentDraft({ method: "CASH", receivedAmount: cashAmount, changeAmount: cashChange });
+    setPaymentModalOpen(false);
+    setConfirmModalOpen(true);
+  }
+
+  async function confirmSale() {
+    const currentBusinessSettings = businessSettings;
+    if (!paymentDraft || !selectedCustomer || !currentBusinessSettings) {
+      setMessage("Faltan datos para confirmar la venta.");
+      return;
+    }
+
+    setLoadingSale(true);
+    try {
+      const saleItems = cart.map((item) => ({ product_id: item.product.id, quantity: item.quantity }));
+      const saleResponse = await createSale({
+        customer_id: selectedCustomer.id,
+        items: saleItems,
+        payment: {
+          method: paymentDraft.method,
+          amount: paymentDraft.receivedAmount.toFixed(2),
+        },
+      });
+      const receiptData: ReceiptData = {
+        sale: saleResponse,
+        items: cart,
+        customer: selectedCustomer,
+        cashierName: fullName ?? "Cajero",
+        paymentMethod: paymentDraft.method,
+        receivedAmount: paymentDraft.receivedAmount,
+        changeAmount: paymentDraft.changeAmount,
+        subtotal: Number(saleResponse.subtotal),
+        tax: Number(saleResponse.tax_amount ?? saleResponse.tax),
+        total: Number(saleResponse.total),
+        businessSettings: currentBusinessSettings,
+        logoUrl: logoImg,
+      };
+      setReceipt(receiptData);
+      setCart([]);
+      setCashReceived("");
+      setPaymentDraft(null);
+      setConfirmModalOpen(false);
+      setMessage("Venta registrada correctamente.");
+      await loadProducts();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No fue posible registrar la venta.");
+    } finally {
+      setLoadingSale(false);
+    }
+  }
+
+  function openCreateCustomerModal() {
+    setEditingCustomer(null);
+    setCustomerForm(emptyCustomerForm);
+    setCustomerModalOpen(true);
+  }
+
+  function openEditDefaultCustomerModal() {
+    const customer = defaultCustomer ?? selectedCustomer;
+    if (!customer) {
+      return;
+    }
+    setEditingCustomer(customer);
+    setCustomerForm(customerToPayload(customer));
+    setCustomerModalOpen(true);
+  }
+
+  async function saveCustomer() {
+    if (!customerForm.name.trim() || !customerForm.document_number?.trim()) {
+      setMessage("El nombre y documento del cliente son obligatorios.");
+      return;
+    }
+    const customer = editingCustomer
+      ? await updateCustomer(editingCustomer.id, customerForm)
+      : await createCustomer(customerForm);
+    await loadCustomers();
+    setSelectedCustomerId(customer.id);
+    setCustomerModalOpen(false);
+    setMessage(editingCustomer ? "Cliente actualizado." : "Cliente creado.");
+  }
+
+  return (
+    <section className="flex min-h-[calc(100vh-9rem)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white lg:flex-row">
+      <div className="flex min-w-0 flex-1 flex-col bg-[#F8FAFC]">
+        <div className="space-y-4 border-b border-gray-200 bg-white p-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900">Ventas</h2>
+              <p className="text-sm text-gray-500">Busca, escanea y factura productos desde una sola pantalla.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: "ALL", label: "Todos" },
+                { value: "AVAILABLE", label: "Disponibles" },
+                { value: "LOW", label: "Bajo stock" },
+                { value: "OUT", label: "Sin stock" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setStockFilter(option.value as typeof stockFilter)}
+                  className={`rounded-lg px-4 py-2 text-sm transition-colors ${
+                    stockFilter === option.value ? "bg-[#1B8A5A] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[1fr_280px]">
+            <label className="relative">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="h-12 w-full rounded-lg border border-gray-300 bg-white pl-11 pr-4 outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+                placeholder="Buscar productos..."
+              />
+            </label>
+            <label className="relative">
+              <Barcode className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+              <input
+                value={barcodeBuffer}
+                onChange={(event) => handleBarcodeChange(event.target.value)}
+                className="h-12 w-full rounded-lg border border-gray-300 bg-white pl-11 pr-4 outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+                placeholder="Código de barras"
+                autoFocus
+              />
+            </label>
+          </div>
+
+          {message && <p className="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-800">{message}</p>}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {visibleProducts.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <Package className="mb-4 h-16 w-16 text-gray-300" />
+              <h3 className="text-lg font-medium text-gray-900">No hay productos</h3>
+              <p className="text-sm text-gray-500">No se encontraron productos para la búsqueda actual.</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {visibleProducts.map((product) => {
+                const imageUrl = getProductImageUrl(product);
+                const stock = product.inventory?.quantity ?? 0;
+                return (
+                  <button
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    className="overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-sm transition hover:border-[#1B8A5A]/40 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={stock <= 0}
+                  >
+                    {imageUrl ? (
+                      <img src={imageUrl} alt={product.name} className="h-32 w-full object-cover" />
+                    ) : (
+                      <div className="flex h-32 items-center justify-center bg-emerald-50">
+                        <Package className="h-10 w-10 text-[#1B8A5A]" />
+                      </div>
+                    )}
+                    <div className="space-y-3 p-4">
+                      <div>
+                        <p className="line-clamp-1 font-semibold text-gray-900">{product.name}</p>
+                        <p className="text-xs text-gray-500">{product.sku}</p>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-lg font-bold text-[#1B8A5A]">{currency(Number(product.price))}</span>
+                        <span className={`text-xs ${stock <= 0 ? "text-red-600" : product.inventory?.low_stock ? "text-amber-600" : "text-gray-500"}`}>
+                          {stock} unidades
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <aside className="flex w-full flex-col border-l border-gray-200 bg-white lg:w-[430px]">
+        <div className="border-b border-gray-200 p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="h-5 w-5 text-[#1B8A5A]" />
+              <h3 className="text-lg font-semibold text-gray-900">Carrito de Venta</h3>
+            </div>
+            {cart.length > 0 && (
+              <button onClick={() => setCart([])} className="text-sm text-red-600 hover:text-red-700">
+                Vaciar
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3 border-b border-gray-200 p-5">
+          <label className="block text-sm font-medium text-gray-700">Cliente</label>
+          <div className="flex gap-2">
+            <select
+              value={selectedCustomerId}
+              onChange={(event) => setSelectedCustomerId(Number(event.target.value))}
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+            >
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </select>
+            <button onClick={openCreateCustomerModal} className="rounded-lg border border-gray-300 p-2 hover:bg-gray-50" aria-label="Crear cliente">
+              <Plus className="h-4 w-4" />
+            </button>
+            <button onClick={openEditDefaultCustomerModal} className="rounded-lg border border-gray-300 p-2 hover:bg-gray-50" aria-label="Editar cliente predeterminado">
+              <UserRound className="h-4 w-4" />
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">Usa el cliente predeterminado o registra uno antes de facturar.</p>
+        </div>
+
+        <div className="min-h-[240px] flex-1 overflow-y-auto p-4">
+          {cart.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <ShoppingCart className="mb-4 h-16 w-16 text-gray-300" />
+              <h3 className="text-lg font-medium text-gray-900">Carrito vacío</h3>
+              <p className="text-sm text-gray-500">Agrega productos del catálogo para comenzar.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {cart.map((item) => (
+                <div key={item.product.id} className="rounded-lg border border-gray-200 bg-[#F8FAFC] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="line-clamp-1 text-sm font-medium text-gray-900">{item.product.name}</p>
+                      <p className="text-sm font-semibold text-[#1B8A5A]">{currency(Number(item.product.price))}</p>
+                    </div>
+                    <button onClick={() => changeQuantity(item.product.id, -item.quantity)} className="rounded-md p-1.5 text-red-600 hover:bg-red-50" aria-label="Eliminar producto">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="flex items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+                      <button onClick={() => changeQuantity(item.product.id, -1)} className="p-2 hover:bg-gray-50" aria-label="Disminuir cantidad">
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <span className="w-12 text-center text-sm font-semibold">{item.quantity}</span>
+                      <button onClick={() => changeQuantity(item.product.id, 1)} className="p-2 hover:bg-gray-50" aria-label="Aumentar cantidad">
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <span className="font-semibold text-gray-900">{currency(Number(item.product.price) * item.quantity)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 border-t border-gray-200 p-5">
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Subtotal</span>
+              <span className="font-medium text-gray-900">{currency(subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Impuestos ({taxPercentage.toFixed(2)}%)</span>
+              <span className="font-medium text-gray-900">{currency(tax)}</span>
+            </div>
+            <div className="flex justify-between border-t border-gray-200 pt-3">
+              <span className="text-lg font-semibold text-gray-900">Total</span>
+              <span className="text-2xl font-bold text-[#1B8A5A]">{currency(total)}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { value: "CASH", label: "Efectivo", icon: Banknote },
+              { value: "CARD", label: "Tarjeta", icon: CreditCard },
+              { value: "TRANSFER", label: "Transfer.", icon: ArrowLeftRight },
+            ].map((method) => {
+              const Icon = method.icon;
+              return (
+                <button
+                  key={method.value}
+                  onClick={() => setPaymentMethod(method.value as PaymentMethod)}
+                  className={`rounded-lg border p-3 text-xs font-medium transition ${
+                    paymentMethod === method.value ? "border-[#1B8A5A] bg-emerald-50 text-[#1B8A5A]" : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <Icon className="mx-auto mb-1 h-5 w-5" />
+                  {method.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <button onClick={startCheckout} className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">
+            Procesar Pago
+          </button>
+          <button onClick={() => setCart([])} className="w-full rounded-lg border border-gray-300 px-4 py-3 font-medium text-gray-700 hover:bg-gray-50">
+            Cancelar Venta
+          </button>
+        </div>
+      </aside>
+
+      <ReusableModal open={paymentModalOpen} title="Pago en efectivo" onClose={() => setPaymentModalOpen(false)}>
+        <div className="space-y-5">
+          <div className="rounded-lg bg-emerald-50 p-4 text-center">
+            <p className="text-sm text-gray-500">Total a pagar</p>
+            <p className="text-4xl font-bold text-[#1B8A5A]">{currency(total)}</p>
+          </div>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-gray-700">Valor recibido</span>
+            <input
+              value={cashReceived}
+              onChange={(event) => setCashReceived(event.target.value)}
+              type="number"
+              min="0"
+              step="0.01"
+              className="w-full rounded-lg border border-gray-300 px-3 py-3 text-lg font-semibold outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+              placeholder="0.00"
+            />
+          </label>
+          <div className={`rounded-lg p-4 ${cashAmount >= total ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"}`}>
+            <p className="text-sm">Cambio</p>
+            <p className="text-2xl font-bold">{cashAmount >= total ? currency(cashChange) : "Valor insuficiente"}</p>
+          </div>
+          <button
+            onClick={confirmCashPayment}
+            disabled={cashAmount < total}
+            className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            Confirmar Pago
+          </button>
+        </div>
+      </ReusableModal>
+
+      <ReusableModal open={confirmModalOpen} title="Confirmar venta" onClose={() => setConfirmModalOpen(false)}>
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">Revisa los datos antes de registrar la venta.</p>
+          <div className="rounded-lg border border-gray-200 p-4 text-sm">
+            <div className="flex justify-between"><span>Cliente</span><strong>{selectedCustomer?.name}</strong></div>
+            <div className="flex justify-between"><span>Método</span><strong>{paymentDraft?.method === "CASH" ? "Efectivo" : paymentDraft?.method === "CARD" ? "Tarjeta" : "Transferencia"}</strong></div>
+            <div className="flex justify-between"><span>Impuesto aplicado</span><strong>{taxPercentage.toFixed(2)}%</strong></div>
+            <div className="flex justify-between"><span>Total</span><strong>{currency(total)}</strong></div>
+            <div className="flex justify-between"><span>Recibido</span><strong>{currency(paymentDraft?.receivedAmount ?? 0)}</strong></div>
+            <div className="flex justify-between"><span>Cambio</span><strong>{currency(paymentDraft?.changeAmount ?? 0)}</strong></div>
+          </div>
+          <button onClick={confirmSale} disabled={loadingSale} className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] disabled:opacity-70">
+            {loadingSale ? "Registrando venta..." : "Registrar venta"}
+          </button>
+        </div>
+      </ReusableModal>
+
+      <ReusableModal open={customerModalOpen} title={editingCustomer ? "Editar cliente" : "Crear cliente"} onClose={() => setCustomerModalOpen(false)}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <input value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} placeholder="Nombre" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={customerForm.document_number ?? ""} onChange={(event) => setCustomerForm({ ...customerForm, document_number: event.target.value })} placeholder="Documento" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={customerForm.phone ?? ""} onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })} placeholder="Teléfono" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={customerForm.email ?? ""} onChange={(event) => setCustomerForm({ ...customerForm, email: event.target.value })} placeholder="Correo" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={customerForm.address ?? ""} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} placeholder="Dirección" className="rounded-lg border border-gray-300 px-3 py-2 md:col-span-2" />
+          <button onClick={saveCustomer} className="rounded-lg bg-[#1B8A5A] px-4 py-2 font-semibold text-white hover:bg-[#156b46] md:col-span-2">
+            Guardar cliente
+          </button>
+        </div>
+      </ReusableModal>
+
+      <ReusableModal open={Boolean(receipt)} title="Venta registrada correctamente" onClose={() => setReceipt(null)}>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-lg bg-emerald-50 p-4 text-emerald-800">
+            <CheckCircle2 className="h-6 w-6" />
+            <p className="text-sm font-medium">¿Desea imprimir o guardar el recibo?</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button onClick={() => receipt && openReceiptWindow(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+              <Eye className="h-4 w-4" /> Ver recibo
+            </button>
+            <button onClick={() => receipt && downloadReceiptPdf(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+              <Download className="h-4 w-4" /> Guardar PDF
+            </button>
+            <button onClick={() => receipt && openReceiptWindow(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+              <Printer className="h-4 w-4" /> Imprimir
+            </button>
+            <button onClick={() => setReceipt(null)} className="rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">
+              Cerrar
+            </button>
+          </div>
+        </div>
+      </ReusableModal>
+    </section>
+  );
+}

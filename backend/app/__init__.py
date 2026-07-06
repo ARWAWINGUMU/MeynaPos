@@ -1,0 +1,2 @@
+"""MeynaPOS backend application package."""
+
