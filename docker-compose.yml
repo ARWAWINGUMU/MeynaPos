@@ -3,15 +3,15 @@ services:
     image: postgres:16-alpine
     container_name: meynapos-db
     environment:
-      POSTGRES_USER: meynapos
-      POSTGRES_PASSWORD: meynapos
-      POSTGRES_DB: meynapos
+      POSTGRES_USER: ${POSTGRES_USER:-meynapos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meynapos}
+      POSTGRES_DB: ${POSTGRES_DB:-meynapos}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U meynapos"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meynapos} -d ${POSTGRES_DB:-meynapos}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,27 +21,46 @@ services:
       context: ./backend
     container_name: meynapos-backend
     environment:
-      DATABASE_URL: postgresql+psycopg://meynapos:meynapos@db:5432/meynapos
-      SECRET_KEY: change-this-secret-in-production
-      ENVIRONMENT: development
-      TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://meynapos:meynapos@db:5432/meynapos}
+      SECRET_KEY: ${SECRET_KEY:-change-this-secret-in-production}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-1x0000000000000000000000000000000AA}
+      RECAPTCHA_SECRET_KEY: ${RECAPTCHA_SECRET_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
+      MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
+      MEDIA_URL_PREFIX: ${MEDIA_URL_PREFIX:-/media}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-5242880}
     ports:
       - "8000:8000"
+    volumes:
+      - media_data:/app/media
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://localhost:8000/api
-        VITE_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api}
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
     container_name: meynapos-frontend
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
+  media_data:

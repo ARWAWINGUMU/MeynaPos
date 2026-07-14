@@ -26,12 +26,13 @@ class ReportService:
 
     def daily_sales(self, target_date: date | None = None) -> DailySalesReport:
         day = target_date or date.today()
-        transactions, subtotal, tax, total = self.reports.sales_totals_for_day(day)
+        transactions, subtotal, tax, discount, total = self.reports.sales_totals_for_day(day)
         return DailySalesReport(
             date=day.isoformat(),
             transactions=transactions,
             subtotal=subtotal,
             tax=tax,
+            discount=discount,
             total=total,
         )
 
@@ -50,6 +51,7 @@ class ReportService:
                 customer=sale.customer.name if sale.customer else "N/A",
                 subtotal=sale.subtotal,
                 tax=sale.tax_amount if hasattr(sale, "tax_amount") else sale.tax,
+                discount=sale.discount_amount,
                 total=sale.total,
                 payment_method=sale.payment.method.value if sale.payment else "N/A",
                 status="PAGADA",

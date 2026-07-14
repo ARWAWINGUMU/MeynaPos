@@ -7,7 +7,7 @@ from app.models.product import Product
 from app.models.purchase import Purchase
 from app.models.purchase_detail import PurchaseDetail
 from app.models.role import Role, RoleName
-from app.models.sale import Sale
+from app.models.sale import DiscountType, Sale
 from app.models.sale_detail import SaleDetail
 from app.models.session import Session
 from app.models.supplier import Supplier

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
+import { useBusinessSettings } from "../hooks/useBusinessSettings";
 import { createPurchase, listPurchases, type PurchaseItemPayload } from "../services/purchaseService";
 import { listProducts } from "../services/productService";
 import type { Product } from "../types/api";
+import { formatMoney, formatMoneyInput, parseMoneyInput } from "../utils/money";
 
 export function PurchasesPage() {
+  const { currency } = useBusinessSettings();
   const [products, setProducts] = useState<Product[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
   const [supplierName, setSupplierName] = useState("");
   const [items, setItems] = useState<PurchaseItemPayload[]>([]);
+  const [unitCostDraft, setUnitCostDraft] = useState("");
 
   async function load() {
     setProducts(await listProducts());
@@ -41,34 +45,35 @@ export function PurchasesPage() {
             {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
           </select>
           <input id="purchase-qty" type="number" placeholder="Cantidad" className="rounded-lg border border-gray-300 px-3 py-2" />
-          <input id="purchase-cost" placeholder="Costo" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={formatMoneyInput(unitCostDraft, currency)} onChange={(event) => setUnitCostDraft(parseMoneyInput(event.target.value))} placeholder="Costo" inputMode="decimal" className="rounded-lg border border-gray-300 px-3 py-2" />
           <button onClick={() => {
             const productId = Number((document.getElementById("purchase-product") as HTMLSelectElement).value);
             const quantity = Number((document.getElementById("purchase-qty") as HTMLInputElement).value);
-            const unitCost = (document.getElementById("purchase-cost") as HTMLInputElement).value;
-            if (productId && quantity > 0 && unitCost) setItems([...items, { product_id: productId, quantity, unit_cost: unitCost }]);
+            if (productId && quantity > 0 && unitCostDraft) {
+              setItems([...items, { product_id: productId, quantity, unit_cost: unitCostDraft }]);
+              setUnitCostDraft("");
+            }
           }} className="rounded-lg bg-[#1B8A5A] px-4 py-2 text-white"><Plus className="h-4 w-4" /></button>
         </div>
         <div className="mt-4 space-y-2">
           {items.map((item, index) => (
             <div key={index} className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3">
-              <span>{products.find((product) => product.id === item.product_id)?.name} · {item.quantity} x ${item.unit_cost}</span>
+              <span>{products.find((product) => product.id === item.product_id)?.name} · {item.quantity} x {formatMoney(item.unit_cost, currency)}</span>
               <button onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}><Trash2 className="h-4 w-4 text-red-600" /></button>
             </div>
           ))}
         </div>
         <div className="mt-4 flex items-center justify-between border-t pt-4">
-          <span className="text-lg font-semibold">Total: ${total.toFixed(2)}</span>
+          <span className="text-lg font-semibold">Total: {formatMoney(total, currency)}</span>
           <button onClick={savePurchase} className="rounded-lg bg-[#1B8A5A] px-4 py-2 text-white">Guardar compra</button>
         </div>
       </div>
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <h3 className="mb-3 font-semibold text-gray-900">Compras registradas</h3>
         <div className="divide-y">
-          {purchases.map((purchase) => <div key={purchase.id} className="flex justify-between py-3"><span>{purchase.supplier_name}</span><span>${purchase.total}</span></div>)}
+          {purchases.map((purchase) => <div key={purchase.id} className="flex justify-between py-3"><span>{purchase.supplier_name}</span><span>{formatMoney(purchase.total, currency)}</span></div>)}
         </div>
       </div>
     </section>
   );
 }
-

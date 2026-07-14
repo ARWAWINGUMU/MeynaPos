@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { PaymentMethod } from "../types/api";
 
 export interface Customer {
   id: number;
@@ -11,8 +12,46 @@ export interface Customer {
 
 export type CustomerPayload = Omit<Customer, "id">;
 
+export interface CustomerSummary extends Customer {
+  purchase_count: number;
+  total_purchased: string;
+  last_purchase_at?: string | null;
+}
+
+export interface CustomerSaleProduct {
+  product_id: number;
+  name: string;
+  quantity: number;
+  unit_price: string;
+  line_total: string;
+}
+
+export interface CustomerSaleHistoryItem {
+  id: number;
+  sale_number: string;
+  date: string;
+  cashier: string;
+  products: CustomerSaleProduct[];
+  subtotal: string;
+  tax: string;
+  discount: string;
+  total: string;
+  payment_method?: PaymentMethod | null;
+  status: string;
+}
+
 export async function listCustomers(search?: string): Promise<Customer[]> {
   const response = await api.get<Customer[]>("/customers", { params: { search } });
+  return response.data;
+}
+
+export async function listCustomerSummary(search?: string): Promise<CustomerSummary[]> {
+  const response = await api.get<CustomerSummary[]>("/customers/summary", { params: { search } });
+  return response.data;
+}
+
+export async function getCustomerHistory(id: number): Promise<CustomerSaleHistoryItem[]> {
+  const response = await api.get<CustomerSaleHistoryItem[]>(`/customers/${id}/history`);
   return response.data;
 }
 

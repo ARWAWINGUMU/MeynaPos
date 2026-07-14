@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Package, Search } from "lucide-react";
 
+import { BarcodeScannerInput } from "../components/BarcodeScannerInput";
 import { useAuth } from "../context/AuthContext";
-import { listProducts, updateProduct } from "../services/productService";
-import type { Product } from "../types/api";
+import { listCategories } from "../services/categoryService";
+import { findProductByBarcode, listProducts, updateProduct } from "../services/productService";
+import type { Category, Product } from "../types/api";
 
 export function InventoryPage() {
   const { role } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<number | "">("");
 
   async function loadInventory() {
     setProducts(await listProducts());
@@ -17,21 +21,32 @@ export function InventoryPage() {
 
   useEffect(() => {
     loadInventory();
+    listCategories().then(setCategories).catch(() => undefined);
   }, []);
 
   const filtered = useMemo(
     () =>
       products.filter((product) => {
-        const matchesSearch = product.name.toLowerCase().includes(search.toLowerCase()) || product.barcode?.includes(search);
+        const matchesSearch = product.name.toLowerCase().includes(search.toLowerCase()) || product.barcode?.includes(search) || product.qr_code?.includes(search);
         const matchesLow = !lowOnly || product.inventory?.low_stock;
-        return matchesSearch && matchesLow;
+        const matchesCategory = categoryFilter === "" || product.category_id === categoryFilter;
+        return matchesSearch && matchesLow && matchesCategory;
       }),
-    [lowOnly, products, search],
+    [categoryFilter, lowOnly, products, search],
   );
 
   async function updateStock(product: Product, quantity: number) {
     await updateProduct(product.id, { quantity });
     await loadInventory();
+  }
+
+  async function handleInventoryScan(code: string) {
+    try {
+      const product = await findProductByBarcode(code);
+      setSearch(product.barcode ?? product.qr_code ?? code);
+    } catch {
+      setSearch(code);
+    }
   }
 
   return (
@@ -46,6 +61,11 @@ export function InventoryPage() {
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar producto o código" className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-4" />
         </div>
+        <BarcodeScannerInput onScan={handleInventoryScan} className="min-w-80" placeholder="Escanear producto" />
+        <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value ? Number(event.target.value) : "")} className="rounded-lg border border-gray-300 px-3 py-3 text-sm">
+          <option value="">Todas las categorias</option>
+          {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+        </select>
         <button onClick={() => setLowOnly((current) => !current)} className={`rounded-lg px-4 py-2 ${lowOnly ? "bg-yellow-100 text-yellow-800" : "border border-gray-300 bg-white"}`}>
           Bajo stock
         </button>
@@ -64,7 +84,7 @@ export function InventoryPage() {
                 <span className={`rounded-full px-3 py-1 text-xs ${statusClass}`}>{status}</span>
               </div>
               <h3 className="font-medium text-gray-900">{product.name}</h3>
-              <p className="mt-1 text-xs text-gray-500">{product.barcode ?? product.sku}</p>
+              <p className="mt-1 text-xs text-gray-500">{product.barcode ?? product.qr_code ?? product.sku}</p>
               <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg bg-gray-50 p-3">
                   <p className="text-gray-500">Stock</p>

@@ -14,6 +14,7 @@ class ProductFactory:
             name=payload.name,
             description=payload.description,
             barcode=payload.barcode,
+            qr_code=payload.qr_code,
             sku=payload.sku,
             price=Decimal(str(payload.price)),
             cost=Decimal(str(payload.cost)),

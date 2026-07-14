@@ -36,14 +36,21 @@ def ensure_runtime_schema() -> None:
         {
             "image_url": "VARCHAR(255)",
             "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "qr_code": "VARCHAR(255)",
         },
     )
+    with database_manager.engine.begin() as connection:
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_products_qr_code ON products (qr_code)"))
     _ensure_columns("customers", {"address": "VARCHAR(255)"})
+    _ensure_columns("categories", {"is_active": "BOOLEAN NOT NULL DEFAULT TRUE"})
     _ensure_columns(
         "sales",
         {
             "tax_percentage": "NUMERIC(5, 2) NOT NULL DEFAULT 0.00",
             "tax_amount": "NUMERIC(12, 2) NOT NULL DEFAULT 0.00",
+            "discount_type": "VARCHAR(20) NOT NULL DEFAULT 'NONE'",
+            "discount_value": "NUMERIC(12, 2) NOT NULL DEFAULT 0.00",
+            "discount_amount": "NUMERIC(12, 2) NOT NULL DEFAULT 0.00",
         },
     )
     with database_manager.engine.begin() as connection:

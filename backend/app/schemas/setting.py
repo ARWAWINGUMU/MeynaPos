@@ -1,6 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -12,7 +14,7 @@ class BusinessSettingsRead(BaseModel):
     phone: str
     email: str
     city: str
-    currency: str
+    currency: Literal["COP", "USD"]
     tax_percentage: Decimal
     logo_url: str | None
     updated_at: datetime
@@ -27,7 +29,7 @@ class BusinessSettingsUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=40)
     email: str | None = Field(default=None, max_length=160)
     city: str | None = Field(default=None, max_length=120)
-    currency: str | None = Field(default=None, min_length=1, max_length=10)
+    currency: Literal["COP", "USD"] | None = None
     tax_percentage: Decimal | None = Field(default=None, ge=0, le=100)
     logo_url: str | None = Field(default=None, max_length=255)
 

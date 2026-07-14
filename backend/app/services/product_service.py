@@ -1,10 +1,9 @@
-from pathlib import Path
-from uuid import uuid4
-
 from fastapi import HTTPException, UploadFile, status
 
 from app.repositories.product_repository import ProductRepository
+from app.models.category import Category
 from app.schemas.product import ProductCreate, ProductUpdate
+from app.services.file_storage_service import FileStorageService
 from app.utils.product_factory import ProductFactory
 
 
@@ -16,6 +15,9 @@ class ProductService:
         return self.products.list(search, category_id, include_inactive)
 
     def create_product(self, payload: ProductCreate):
+        self._normalize_codes(payload)
+        self._ensure_unique_codes(sku=payload.sku, barcode=payload.barcode, qr_code=payload.qr_code)
+        self._ensure_active_category(payload.category_id)
         product = ProductFactory.create_product(payload)
         return self.products.add(product)
 
@@ -23,6 +25,15 @@ class ProductService:
         product = self.products.get(product_id)
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+        self._normalize_codes(payload)
+        next_values = payload.model_dump(exclude_unset=True)
+        self._ensure_unique_codes(
+            sku=next_values.get("sku"),
+            barcode=next_values.get("barcode"),
+            qr_code=next_values.get("qr_code"),
+            exclude_product_id=product_id,
+        )
+        self._ensure_active_category(next_values.get("category_id"))
         for field, value in payload.model_dump(exclude_unset=True).items():
             if field == "quantity" and product.inventory:
                 product.inventory.quantity = value
@@ -47,16 +58,7 @@ class ProductService:
         product = self.products.get(product_id)
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-        extension = Path(file.filename or "").suffix.lower() or ".png"
-        if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image format")
-        upload_dir = Path("static/uploads/products")
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{uuid4().hex}{extension}"
-        destination = upload_dir / filename
-        with destination.open("wb") as buffer:
-            buffer.write(file.file.read())
-        product.image_url = f"/static/uploads/products/{filename}"
+        product.image_url = FileStorageService().save_image(file, "products", product.image_url)
         self.products.db.commit()
         self.products.db.refresh(product)
         return product
@@ -66,3 +68,38 @@ class ProductService:
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         return product
+
+    @staticmethod
+    def _normalize_codes(payload: ProductCreate | ProductUpdate) -> None:
+        for field in ("barcode", "qr_code", "sku"):
+            value = getattr(payload, field, None)
+            if isinstance(value, str):
+                normalized = value.strip()
+                setattr(payload, field, normalized or None)
+
+    def _ensure_unique_codes(
+        self,
+        *,
+        sku: str | None = None,
+        barcode: str | None = None,
+        qr_code: str | None = None,
+        exclude_product_id: int | None = None,
+    ) -> None:
+        checks = (
+            (sku, "SKU already exists"),
+            (barcode, "Barcode already exists"),
+            (qr_code, "QR code already exists"),
+        )
+        for code, message in checks:
+            if not code:
+                continue
+            existing = self.products.get_by_unique_code(code, exclude_product_id)
+            if existing is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
+
+    def _ensure_active_category(self, category_id: int | None) -> None:
+        if not category_id:
+            return
+        category = self.products.db.get(Category, category_id)
+        if category is None or not category.is_active:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Category is not available")

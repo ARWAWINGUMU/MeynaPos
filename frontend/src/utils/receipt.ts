@@ -3,6 +3,8 @@ import { jsPDF } from "jspdf";
 import type { Customer } from "../services/customerService";
 import type { BusinessSettings } from "../services/settingService";
 import type { CartItem, PaymentMethod, SaleResponse } from "../types/api";
+import { resolveMediaUrl } from "./media";
+import { formatMoney } from "./money";
 
 export interface ReceiptData {
   sale: SaleResponse;
@@ -14,6 +16,7 @@ export interface ReceiptData {
   changeAmount: number;
   subtotal: number;
   tax: number;
+  discount: number;
   total: number;
   businessSettings: BusinessSettings;
   logoUrl: string;
@@ -24,12 +27,6 @@ const paymentLabels: Record<PaymentMethod, string> = {
   CARD: "Tarjeta",
   TRANSFER: "Transferencia",
 };
-
-const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000/api").replace(/\/api\/?$/, "");
-
-function money(value: number): string {
-  return `$${value.toFixed(2)}`;
-}
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => {
@@ -44,12 +41,8 @@ function escapeHtml(value: string): string {
   });
 }
 
-function resolveAssetUrl(url: string): string {
-  return url.startsWith("http") || url.startsWith("data:") || url.startsWith("blob:") ? url : `${apiBaseUrl}${url}`;
-}
-
 function businessLogoUrl(data: ReceiptData): string {
-  return data.businessSettings.logo_url ? resolveAssetUrl(data.businessSettings.logo_url) : data.logoUrl;
+  return resolveMediaUrl(data.businessSettings.logo_url) ?? data.logoUrl;
 }
 
 async function toImageDataUrl(url: string): Promise<string | null> {
@@ -80,8 +73,8 @@ export function buildReceiptHtml(data: ReceiptData): string {
         <tr>
           <td>${escapeHtml(item.product.name)}</td>
           <td>${item.quantity}</td>
-          <td>${money(Number(item.product.price))}</td>
-          <td>${money(Number(item.product.price) * item.quantity)}</td>
+          <td>${formatMoney(Number(item.product.price), data.businessSettings.currency)}</td>
+          <td>${formatMoney(Number(item.product.price) * item.quantity, data.businessSettings.currency)}</td>
         </tr>
       `,
     )
@@ -134,11 +127,12 @@ export function buildReceiptHtml(data: ReceiptData): string {
           <tbody>${rows}</tbody>
         </table>
         <section class="totals">
-          <div><span>Subtotal</span><span>${money(data.subtotal)}</span></div>
-          <div><span>Impuesto ${Number(data.businessSettings.tax_percentage).toFixed(2)}%</span><span>${money(data.tax)}</span></div>
-          <div class="total"><span>Total</span><span>${money(data.total)}</span></div>
-          <div><span>Recibido</span><span>${money(data.receivedAmount)}</span></div>
-          <div><span>Cambio</span><span>${money(data.changeAmount)}</span></div>
+          <div><span>Subtotal</span><span>${formatMoney(data.subtotal, data.businessSettings.currency)}</span></div>
+          <div><span>Impuesto ${Number(data.businessSettings.tax_percentage).toFixed(2)}%</span><span>${formatMoney(data.tax, data.businessSettings.currency)}</span></div>
+          <div><span>Descuento</span><span>-${formatMoney(data.discount, data.businessSettings.currency)}</span></div>
+          <div class="total"><span>Total final</span><span>${formatMoney(data.total, data.businessSettings.currency)}</span></div>
+          <div><span>Recibido</span><span>${formatMoney(data.receivedAmount, data.businessSettings.currency)}</span></div>
+          <div><span>Cambio</span><span>${formatMoney(data.changeAmount, data.businessSettings.currency)}</span></div>
         </section>
         <footer>
           <img src="${data.logoUrl}" alt="Logo MeynaPOS" />
@@ -159,6 +153,11 @@ function writeLine(pdf: jsPDF, text: string, x: number, y: number, options?: { b
 }
 
 export async function downloadReceiptPdf(data: ReceiptData): Promise<void> {
+  const pdf = await createReceiptPdf(data);
+  pdf.save(`recibo-${data.sale.invoice_number}.pdf`);
+}
+
+async function createReceiptPdf(data: ReceiptData): Promise<jsPDF> {
   const pdf = new jsPDF({ unit: "pt", format: "letter" });
   const businessLogo = await toImageDataUrl(businessLogoUrl(data));
   const meynaLogo = await toImageDataUrl(data.logoUrl);
@@ -186,23 +185,25 @@ export async function downloadReceiptPdf(data: ReceiptData): Promise<void> {
     const name = item.product.name.slice(0, 38);
     writeLine(pdf, name, 40, y);
     writeLine(pdf, String(item.quantity), 310, y);
-    writeLine(pdf, money(Number(item.product.price)), 380, y);
-    writeLine(pdf, money(Number(item.product.price) * item.quantity), 470, y);
+    writeLine(pdf, formatMoney(Number(item.product.price), data.businessSettings.currency), 380, y);
+    writeLine(pdf, formatMoney(Number(item.product.price) * item.quantity, data.businessSettings.currency), 470, y);
     y += 18;
   });
 
   y += 22;
-  writeLine(pdf, `Subtotal general: ${money(data.subtotal)}`, 360, y);
+  writeLine(pdf, `Subtotal general: ${formatMoney(data.subtotal, data.businessSettings.currency)}`, 360, y);
   y += 18;
   writeLine(pdf, `Impuesto aplicado: ${Number(data.businessSettings.tax_percentage).toFixed(2)}%`, 360, y);
   y += 18;
-  writeLine(pdf, `Valor del impuesto: ${money(data.tax)}`, 360, y);
+  writeLine(pdf, `Valor del impuesto: ${formatMoney(data.tax, data.businessSettings.currency)}`, 360, y);
   y += 18;
-  writeLine(pdf, `Total: ${money(data.total)}`, 360, y, { bold: true, size: 13 });
+  writeLine(pdf, `Descuento: -${formatMoney(data.discount, data.businessSettings.currency)}`, 360, y);
   y += 18;
-  writeLine(pdf, `Valor recibido: ${money(data.receivedAmount)}`, 360, y);
+  writeLine(pdf, `Total final: ${formatMoney(data.total, data.businessSettings.currency)}`, 360, y, { bold: true, size: 13 });
   y += 18;
-  writeLine(pdf, `Cambio: ${money(data.changeAmount)}`, 360, y);
+  writeLine(pdf, `Valor recibido: ${formatMoney(data.receivedAmount, data.businessSettings.currency)}`, 360, y);
+  y += 18;
+  writeLine(pdf, `Cambio: ${formatMoney(data.changeAmount, data.businessSettings.currency)}`, 360, y);
 
   const footerY = 710;
   pdf.line(40, footerY - 18, 572, footerY - 18);
@@ -210,7 +211,26 @@ export async function downloadReceiptPdf(data: ReceiptData): Promise<void> {
   writeLine(pdf, "MeynaPOS", 86, footerY + 12, { bold: true, size: 12 });
   writeLine(pdf, "Tecnología desarrollada por MeynaPOS — Tecnología para crecer juntos", 86, footerY + 30);
 
-  pdf.save(`recibo-${data.sale.invoice_number}.pdf`);
+  return pdf;
+}
+
+export async function printReceiptPdf(data: ReceiptData): Promise<void> {
+  const pdf = await createReceiptPdf(data);
+  pdf.autoPrint();
+  const blobUrl = pdf.output("bloburl");
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.src = String(blobUrl);
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+  };
 }
 
 export function openReceiptWindow(data: ReceiptData): void {

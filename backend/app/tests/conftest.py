@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,8 @@ from app.models.user import User
 @pytest.fixture()
 def db_session() -> Session:
     os.environ["TURNSTILE_SECRET_KEY"] = "1x0000000000000000000000000000000AA"
+    os.environ["MEDIA_ROOT"] = "./test_media"
+    os.environ["MEDIA_URL_PREFIX"] = "/media"
     get_settings.cache_clear()
     database_manager.configure("sqlite:///./test_meynapos.db")
     Base.metadata.drop_all(bind=database_manager.engine)
@@ -40,6 +43,7 @@ def db_session() -> Session:
     finally:
         db.close()
         Base.metadata.drop_all(bind=database_manager.engine)
+        shutil.rmtree("./test_media", ignore_errors=True)
 
 
 @pytest.fixture()

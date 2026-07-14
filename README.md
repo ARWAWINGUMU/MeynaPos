@@ -6,6 +6,55 @@ Slogan: **“Tecnología para crecer juntos”**
 
 This repository was created as a Software Engineering II final project and includes a production-style base architecture with FastAPI, PostgreSQL, SQLAlchemy, Alembic, JWT authentication, React, Vite, TailwindCSS, Docker, CI/CD, and automated tests.
 
+## Deployment Quick Start
+
+Requirements:
+
+- Docker Desktop with Docker Compose.
+- Python 3.12+ for local backend tests.
+- Node.js 20+ only when building the frontend outside Docker.
+
+Environment:
+
+- Copy `.env.example` to `.env` for Docker deployments.
+- Set a strong `SECRET_KEY` and database password before production use.
+- Keep `DATABASE_URL` pointing to `db` inside Docker: `postgresql+psycopg://USER:PASSWORD@db:5432/DB`.
+- `VITE_API_URL` must point to the browser-accessible backend API, by default `http://localhost:8000/api`.
+- Media files are stored in the named Docker volume `pos_media_data` and served through `/media`.
+
+Deploy:
+
+```bash
+docker compose up -d --build
+```
+
+Local URLs:
+
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:8000/health`
+- API docs: `http://localhost:8000/docs`
+- PostgreSQL: `localhost:5432`
+
+Stop and restart:
+
+```bash
+docker compose stop
+docker compose restart
+docker compose up -d --no-build
+```
+
+Logs:
+
+```bash
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose logs -f db
+```
+
+Known external issue:
+
+- If Docker Hub or CloudFront DNS fails while building, reuse existing local images with `docker compose up -d --no-build` and retry the build later. Do not remove volumes; `pos_postgres_data` and `pos_media_data` contain persistent data.
+
 ## Architecture
 
 The backend follows Clean Architecture principles:

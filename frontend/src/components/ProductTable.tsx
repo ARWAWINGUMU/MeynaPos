@@ -1,6 +1,9 @@
+import { useBusinessSettings } from "../hooks/useBusinessSettings";
 import type { Product } from "../types/api";
+import { formatMoney } from "../utils/money";
 
 export function ProductTable({ products }: { products: Product[] }) {
+  const { currency } = useBusinessSettings();
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -19,7 +22,7 @@ export function ProductTable({ products }: { products: Product[] }) {
               <td className="px-4 py-3 font-medium text-slate-900">{product.name}</td>
               <td className="px-4 py-3 text-slate-600">{product.sku}</td>
               <td className="px-4 py-3 text-slate-600">{product.barcode ?? "-"}</td>
-              <td className="px-4 py-3 text-slate-900">${product.price}</td>
+              <td className="px-4 py-3 text-slate-900">{formatMoney(product.price, currency)}</td>
               <td className="px-4 py-3">
                 <span className={product.inventory?.low_stock ? "text-amber-700" : "text-emerald-700"}>
                   {product.inventory?.quantity ?? 0}
@@ -32,4 +35,3 @@ export function ProductTable({ products }: { products: Product[] }) {
     </div>
   );
 }
-

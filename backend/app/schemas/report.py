@@ -8,6 +8,7 @@ class DailySalesReport(BaseModel):
     transactions: int
     subtotal: Decimal
     tax: Decimal
+    discount: Decimal
     total: Decimal
 
 
@@ -18,6 +19,7 @@ class SalesReportItem(BaseModel):
     customer: str
     subtotal: Decimal
     tax: Decimal
+    discount: Decimal
     total: Decimal
     payment_method: str
     status: str

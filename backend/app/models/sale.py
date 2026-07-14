@@ -1,10 +1,17 @@
+import enum
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
+
+
+class DiscountType(str, enum.Enum):
+    NONE = "NONE"
+    FIXED = "FIXED"
+    PERCENTAGE = "PERCENTAGE"
 
 
 class Sale(Base):
@@ -18,6 +25,9 @@ class Sale(Base):
     tax_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    discount_type: Mapped[DiscountType] = mapped_column(Enum(DiscountType), default=DiscountType.NONE, nullable=False)
+    discount_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 

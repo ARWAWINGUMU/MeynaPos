@@ -20,6 +20,7 @@ export interface Product {
   name: string;
   description?: string | null;
   barcode?: string | null;
+  qr_code?: string | null;
   sku: string;
   price: string;
   cost: string;
@@ -29,12 +30,20 @@ export interface Product {
   inventory?: Inventory | null;
 }
 
+export interface Category {
+  id: number;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+}
+
 export interface CartItem {
   product: Product;
   quantity: number;
 }
 
 export type PaymentMethod = "CASH" | "CARD" | "TRANSFER";
+export type DiscountType = "NONE" | "FIXED" | "PERCENTAGE";
 
 export interface SalePayload {
   customer_id: number;
@@ -44,6 +53,9 @@ export interface SalePayload {
     amount: string;
     reference?: string | null;
   };
+  tipo_descuento?: DiscountType;
+  valor_descuento?: string;
+  monto_descuento?: string;
 }
 
 export interface SaleResponse {
@@ -54,6 +66,9 @@ export interface SaleResponse {
   tax_percentage: string;
   tax_amount: string;
   tax: string;
+  tipo_descuento: DiscountType;
+  valor_descuento: string;
+  monto_descuento: string;
   total: string;
   created_at: string;
   payment: {
@@ -68,6 +83,7 @@ export interface DailySalesReport {
   transactions: number;
   subtotal: string;
   tax: string;
+  discount: string;
   total: string;
 }
 
@@ -93,6 +109,7 @@ export interface SalesReportItem {
   customer: string;
   subtotal: string;
   tax: string;
+  discount: string;
   total: string;
   payment_method: string;
   status: string;

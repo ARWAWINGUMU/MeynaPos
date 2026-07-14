@@ -22,6 +22,7 @@ import {
   getSalesReport,
   getTopProductsReport,
 } from "../services/reportService";
+import { useBusinessSettings } from "../hooks/useBusinessSettings";
 import type {
   InventoryReportItem,
   MonthlyRevenueReportItem,
@@ -29,12 +30,8 @@ import type {
   SalesReportItem,
   TopProductReportItem,
 } from "../types/api";
-
+import { formatMoney } from "../utils/money";
 const paymentColors = ["#047857", "#0891b2", "#1E4E5F"];
-
-function money(value: string | number): string {
-  return new Intl.NumberFormat("es-CO", { style: "currency", currency: "USD" }).format(Number(value));
-}
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -45,6 +42,7 @@ function EmptyState() {
 }
 
 export function ReportsPage() {
+  const { currency } = useBusinessSettings();
   const [sales, setSales] = useState<SalesReportItem[]>([]);
   const [inventory, setInventory] = useState<InventoryReportItem[]>([]);
   const [topProducts, setTopProducts] = useState<TopProductReportItem[]>([]);
@@ -99,7 +97,7 @@ export function ReportsPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricTile label="Ventas registradas" value={`${sales.length}`} icon={BarChart3} />
-        <MetricTile label="Ingresos" value={money(totalRevenue)} icon={TrendingUp} />
+        <MetricTile label="Ingresos" value={formatMoney(totalRevenue, currency)} icon={TrendingUp} />
         <MetricTile label="Bajo stock" value={`${lowStock.length}`} icon={Package} />
         <MetricTile label="Métodos pago" value={`${payments.length}`} icon={CreditCard} />
       </div>
@@ -116,7 +114,7 @@ export function ReportsPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="name" stroke="#6b7280" />
                   <YAxis stroke="#6b7280" />
-                  <Tooltip formatter={(value, name) => (name === "ingresos" ? money(Number(value)) : value)} />
+                  <Tooltip formatter={(value, name) => (name === "ingresos" ? formatMoney(Number(value), currency) : value)} />
                   <Bar dataKey="ingresos" fill="#047857" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -137,7 +135,7 @@ export function ReportsPage() {
                       <Cell key={entry.name} fill={paymentColors[index % paymentColors.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value) => money(Number(value))} />
+                  <Tooltip formatter={(value) => formatMoney(Number(value), currency)} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -156,7 +154,7 @@ export function ReportsPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="month" stroke="#6b7280" />
                   <YAxis stroke="#6b7280" />
-                  <Tooltip formatter={(value, name) => (name === "ingresos" ? money(Number(value)) : value)} />
+                  <Tooltip formatter={(value, name) => (name === "ingresos" ? formatMoney(Number(value), currency) : value)} />
                   <Bar dataKey="ingresos" fill="#0891b2" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -180,6 +178,7 @@ export function ReportsPage() {
                   <th className="px-3 py-3">Cliente</th>
                   <th className="px-3 py-3">Subtotal</th>
                   <th className="px-3 py-3">Impuesto</th>
+                  <th className="px-3 py-3">Descuento</th>
                   <th className="px-3 py-3">Total</th>
                   <th className="px-3 py-3">Pago</th>
                   <th className="px-3 py-3">Estado</th>
@@ -192,9 +191,10 @@ export function ReportsPage() {
                     <td className="px-3 py-3">{formatDate(sale.date)}</td>
                     <td className="px-3 py-3">{sale.cashier}</td>
                     <td className="px-3 py-3">{sale.customer}</td>
-                    <td className="px-3 py-3">{money(sale.subtotal)}</td>
-                    <td className="px-3 py-3">{money(sale.tax)}</td>
-                    <td className="px-3 py-3 font-semibold text-[#047857]">{money(sale.total)}</td>
+                    <td className="px-3 py-3">{formatMoney(sale.subtotal, currency)}</td>
+                    <td className="px-3 py-3">{formatMoney(sale.tax, currency)}</td>
+                    <td className="px-3 py-3">-{formatMoney(sale.discount, currency)}</td>
+                    <td className="px-3 py-3 font-semibold text-[#047857]">{formatMoney(sale.total, currency)}</td>
                     <td className="px-3 py-3">{sale.payment_method}</td>
                     <td className="px-3 py-3"><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">{sale.status}</span></td>
                   </tr>

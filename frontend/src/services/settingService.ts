@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { CurrencyCode } from "../utils/money";
 
 export interface BusinessSettings {
   id: number;
@@ -8,7 +9,7 @@ export interface BusinessSettings {
   phone: string;
   email: string;
   city: string;
-  currency: string;
+  currency: CurrencyCode;
   tax_percentage: string;
   logo_url?: string | null;
   updated_at: string;

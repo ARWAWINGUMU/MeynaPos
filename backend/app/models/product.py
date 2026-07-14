@@ -14,6 +14,7 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(String(255))
     barcode: Mapped[str | None] = mapped_column(String(80), unique=True, index=True)
+    qr_code: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     sku: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)

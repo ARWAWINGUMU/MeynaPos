@@ -4,13 +4,11 @@ import type { LucideIcon } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { useAuth } from "../context/AuthContext";
+import { useBusinessSettings } from "../hooks/useBusinessSettings";
 import { getDashboardSummary } from "../services/dashboardService";
 import { getInventoryReport, getTopProductsReport } from "../services/reportService";
 import type { DashboardSummary, InventoryReportItem, TopProductReportItem } from "../types/api";
-
-function money(value: string | number): string {
-  return new Intl.NumberFormat("es-CO", { style: "currency", currency: "USD" }).format(Number(value));
-}
+import { formatMoney } from "../utils/money";
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("es-CO", { month: "short", day: "2-digit" }).format(new Date(`${value}T00:00:00`));
@@ -51,6 +49,7 @@ function StatCard({
 
 export function DashboardPage() {
   const { fullName, role } = useAuth();
+  const { currency } = useBusinessSettings();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [inventory, setInventory] = useState<InventoryReportItem[]>([]);
   const [topProducts, setTopProducts] = useState<TopProductReportItem[]>([]);
@@ -108,7 +107,7 @@ export function DashboardPage() {
         <StatCard title="Productos en Stock" value={`${summary?.products_in_stock ?? 0}`} icon={Package} color="cyan" />
         <StatCard title="Productos Bajo Stock" value={`${summary?.low_stock_products ?? 0}`} icon={AlertTriangle} color="orange" />
         <StatCard title="Total Clientes" value={`${summary?.total_clients ?? 0}`} icon={Users} color="purple" />
-        <StatCard title="Ingresos Mensuales" value={money(summary?.monthly_revenue ?? 0)} icon={TrendingUp} color="blue" />
+        <StatCard title="Ingresos Mensuales" value={formatMoney(summary?.monthly_revenue ?? 0, currency)} icon={TrendingUp} color="blue" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -132,7 +131,7 @@ export function DashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="date" stroke="#6b7280" />
                   <YAxis stroke="#6b7280" />
-                  <Tooltip formatter={(value) => money(Number(value))} />
+                  <Tooltip formatter={(value) => formatMoney(Number(value), currency)} />
                   <Area type="monotone" dataKey="ingresos" stroke="#047857" fill="url(#dashboardRevenue)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -166,7 +165,7 @@ export function DashboardPage() {
                 <div key={item.product_id} className="rounded-lg border border-gray-200 p-4">
                   <p className="font-medium text-gray-900">{item.name}</p>
                   <p className="mt-1 text-sm text-gray-500">{item.quantity_sold} unidades vendidas</p>
-                  <p className="mt-2 font-semibold text-[#047857]">{money(item.total)}</p>
+                  <p className="mt-2 font-semibold text-[#047857]">{formatMoney(item.total, currency)}</p>
                 </div>
               ))}
             </div>

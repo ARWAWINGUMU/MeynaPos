@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class InventoryRead(BaseModel):
@@ -12,13 +12,16 @@ class InventoryRead(BaseModel):
 class ProductBase(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     description: str | None = None
-    barcode: str | None = Field(default=None, max_length=80)
+    barcode: str | None = Field(default=None, max_length=80, validation_alias=AliasChoices("barcode", "codigo_barras"))
+    qr_code: str | None = Field(default=None, max_length=255, validation_alias=AliasChoices("qr_code", "codigo_qr"))
     sku: str = Field(min_length=2, max_length=80)
     price: Decimal = Field(gt=0)
     cost: Decimal = Field(ge=0)
     category_id: int | None = None
     supplier_id: int | None = None
     image_url: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ProductCreate(ProductBase):
@@ -29,7 +32,8 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = None
-    barcode: str | None = Field(default=None, max_length=80)
+    barcode: str | None = Field(default=None, max_length=80, validation_alias=AliasChoices("barcode", "codigo_barras"))
+    qr_code: str | None = Field(default=None, max_length=255, validation_alias=AliasChoices("qr_code", "codigo_qr"))
     sku: str | None = Field(default=None, min_length=2, max_length=80)
     price: Decimal | None = Field(default=None, gt=0)
     cost: Decimal | None = Field(default=None, ge=0)
@@ -39,6 +43,8 @@ class ProductUpdate(BaseModel):
     is_active: bool | None = None
     quantity: int | None = Field(default=None, ge=0)
     minimum_stock: int | None = Field(default=None, ge=0)
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ProductRead(ProductBase):

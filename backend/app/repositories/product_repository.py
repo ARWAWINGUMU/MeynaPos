@@ -19,6 +19,7 @@ class ProductRepository:
                     Product.name.ilike(term),
                     Product.sku.ilike(term),
                     Product.barcode.ilike(term),
+                    Product.qr_code.ilike(term),
                 )
             )
         if category_id:
@@ -30,7 +31,16 @@ class ProductRepository:
         return self.db.scalars(statement).first()
 
     def get_by_barcode(self, barcode: str) -> Product | None:
-        statement = select(Product).options(joinedload(Product.inventory)).where(Product.barcode == barcode, Product.is_active.is_(True))
+        statement = select(Product).options(joinedload(Product.inventory)).where(
+            or_(Product.barcode == barcode, Product.qr_code == barcode),
+            Product.is_active.is_(True),
+        )
+        return self.db.scalars(statement).first()
+
+    def get_by_unique_code(self, code: str, exclude_product_id: int | None = None) -> Product | None:
+        statement = select(Product).where(or_(Product.barcode == code, Product.qr_code == code, Product.sku == code))
+        if exclude_product_id is not None:
+            statement = statement.where(Product.id != exclude_product_id)
         return self.db.scalars(statement).first()
 
     def add(self, product: Product) -> Product:

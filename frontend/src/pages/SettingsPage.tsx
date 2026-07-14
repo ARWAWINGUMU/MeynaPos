@@ -3,14 +3,11 @@ import { Building2, Save, Upload } from "lucide-react";
 
 import logoImg from "../assets/logo.png";
 import { getSettings, updateSettings, uploadBusinessLogo, type BusinessSettings } from "../services/settingService";
-
-const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000/api").replace(/\/api\/?$/, "");
+import { resolveMediaUrl } from "../utils/media";
+import { SUPPORTED_CURRENCIES, type CurrencyCode } from "../utils/money";
 
 function resolveLogoUrl(logoUrl?: string | null): string {
-  if (!logoUrl) {
-    return logoImg;
-  }
-  return logoUrl.startsWith("http") ? logoUrl : `${apiBaseUrl}${logoUrl}`;
+  return resolveMediaUrl(logoUrl) ?? logoImg;
 }
 
 export function SettingsPage() {
@@ -36,8 +33,8 @@ export function SettingsPage() {
       setError("El nombre del negocio es obligatorio.");
       return;
     }
-    if (!settings.currency.trim()) {
-      setError("La moneda es obligatoria.");
+    if (!SUPPORTED_CURRENCIES.includes(settings.currency)) {
+      setError("Selecciona una moneda válida.");
       return;
     }
     const taxPercentage = Number(settings.tax_percentage);
@@ -128,7 +125,14 @@ export function SettingsPage() {
           </label>
           <label className="space-y-1">
             <span className="text-sm font-medium text-gray-700">Moneda</span>
-            <input value={settings.currency} onChange={(e) => updateField("currency", e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2" />
+            <select
+              value={settings.currency}
+              onChange={(e) => updateField("currency", e.target.value as CurrencyCode)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2"
+            >
+              <option value="COP">COP - Peso colombiano</option>
+              <option value="USD">USD - Dólar estadounidense</option>
+            </select>
           </label>
           <label className="space-y-1">
             <span className="text-sm font-medium text-gray-700">Porcentaje de impuesto</span>

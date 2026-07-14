@@ -5,9 +5,11 @@ export interface ProductFormPayload {
   name: string;
   description?: string;
   barcode?: string;
+  qr_code?: string;
   sku: string;
   price: string;
   cost: string;
+  category_id?: number | null;
   image_url?: string;
   initial_stock?: number;
   minimum_stock?: number;
@@ -19,7 +21,7 @@ export async function listProducts(search?: string, categoryId?: number, include
 }
 
 export async function findProductByBarcode(barcode: string): Promise<Product> {
-  const response = await api.get<Product>(`/products/barcode/${barcode}`);
+  const response = await api.get<Product>(`/products/barcode/${encodeURIComponent(barcode)}`);
   return response.data;
 }
 

@@ -29,12 +29,15 @@ def seed_initial_data(db: Session) -> None:
                 phone="N/A",
                 email="N/A",
                 city="N/A",
-                currency="USD",
+                currency="COP",
                 tax_percentage=0,
                 logo_url=None,
             )
         )
     else:
+        for setting in db.scalars(select(BusinessSetting)).all():
+            if setting.currency not in {"COP", "USD"}:
+                setting.currency = "COP"
         for setting in db.scalars(select(BusinessSetting).where(BusinessSetting.logo_url == "/static/uploads/business/default-logo.png")).all():
             setting.logo_url = None
 
@@ -80,7 +83,7 @@ def seed_initial_data(db: Session) -> None:
 
     defaults = {
         "business_name": "MeynaPOS",
-        "currency": "USD",
+        "currency": "COP",
         "default_minimum_stock": "5",
         "system_notes": "Tecnología para crecer juntos",
     }

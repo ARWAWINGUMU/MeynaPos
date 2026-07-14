@@ -1,7 +1,6 @@
 import {
   ArrowLeftRight,
   Banknote,
-  Barcode,
   CheckCircle2,
   CreditCard,
   Download,
@@ -13,27 +12,30 @@ import {
   Search,
   ShoppingCart,
   Trash2,
-  UserRound,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import logoImg from "../assets/logo.png";
+import { BarcodeScannerInput } from "../components/BarcodeScannerInput";
 import { ReusableModal } from "../components/ReusableModal";
 import { useAuth } from "../context/AuthContext";
-import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
+import { createCategory, listCategories } from "../services/categoryService";
 import {
   createCustomer,
   getDefaultCustomer,
+  getCustomerHistory,
   listCustomers,
-  updateCustomer,
   type Customer,
+  type CustomerSaleHistoryItem,
   type CustomerPayload,
 } from "../services/customerService";
-import { findProductByBarcode, listProducts } from "../services/productService";
+import { createProduct, findProductByBarcode, listProducts, type ProductFormPayload } from "../services/productService";
 import { createSale } from "../services/saleService";
 import { getSettings, type BusinessSettings } from "../services/settingService";
-import type { CartItem, PaymentMethod, Product } from "../types/api";
-import { downloadReceiptPdf, openReceiptWindow, type ReceiptData } from "../utils/receipt";
+import type { CartItem, Category, DiscountType, PaymentMethod, Product } from "../types/api";
+import { resolveMediaUrl } from "../utils/media";
+import { formatMoney, formatMoneyInput, parseMoneyInput } from "../utils/money";
+import { downloadReceiptPdf, printReceiptPdf, type ReceiptData } from "../utils/receipt";
 
 interface PaymentDraft {
   method: PaymentMethod;
@@ -49,49 +51,54 @@ const emptyCustomerForm: CustomerPayload = {
   address: "",
 };
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000/api").replace(/\/api\/?$/, "");
-
-function currency(value: number): string {
-  return `$${value.toFixed(2)}`;
-}
+const emptyProductForm: ProductFormPayload = {
+  name: "",
+  description: "",
+  barcode: "",
+  qr_code: "",
+  sku: "",
+  price: "",
+  cost: "",
+  category_id: null,
+  initial_stock: 0,
+  minimum_stock: 5,
+};
 
 function getProductImageUrl(product: Product): string | null {
-  if (!product.image_url) {
-    return null;
-  }
-  return product.image_url.startsWith("http") ? product.image_url : `${apiBaseUrl}${product.image_url}`;
-}
-
-function customerToPayload(customer: Customer): CustomerPayload {
-  return {
-    name: customer.name,
-    document_number: customer.document_number ?? "",
-    phone: customer.phone ?? "",
-    email: customer.email ?? "",
-    address: customer.address ?? "",
-  };
+  return resolveMediaUrl(product.image_url);
 }
 
 export function POSPage() {
-  const { fullName } = useAuth();
+  const { fullName, role } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [defaultCustomer, setDefaultCustomer] = useState<Customer | null>(null);
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | "">("");
+  const [customerSearch, setCustomerSearch] = useState("");
   const [search, setSearch] = useState("");
   const [stockFilter, setStockFilter] = useState<"ALL" | "AVAILABLE" | "LOW" | "OUT">("ALL");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [cashReceived, setCashReceived] = useState("");
+  const [discountType, setDiscountType] = useState<DiscountType>("NONE");
+  const [discountValue, setDiscountValue] = useState("");
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loadingSale, setLoadingSale] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
+  const [scanNotFoundModalOpen, setScanNotFoundModalOpen] = useState(false);
+  const [productModalOpen, setProductModalOpen] = useState(false);
   const [customerForm, setCustomerForm] = useState<CustomerPayload>(emptyCustomerForm);
+  const [customerHistory, setCustomerHistory] = useState<CustomerSaleHistoryItem[]>([]);
+  const [customerHistoryLoading, setCustomerHistoryLoading] = useState(false);
+  const [scannedCode, setScannedCode] = useState("");
+  const [productForm, setProductForm] = useState<ProductFormPayload>(emptyProductForm);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
 
   const loadProducts = useCallback(async () => {
@@ -115,6 +122,10 @@ export function POSPage() {
   }, [loadCustomers]);
 
   useEffect(() => {
+    listCategories().then(setCategories).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     getSettings()
       .then(setBusinessSettings)
       .catch(() => setMessage("No fue posible cargar la configuración del negocio."));
@@ -124,6 +135,14 @@ export function POSPage() {
     () => customers.find((customer) => customer.id === selectedCustomerId) ?? null,
     [customers, selectedCustomerId],
   );
+
+  const filteredCustomers = useMemo(() => {
+    const term = customerSearch.trim().toLowerCase();
+    if (!term) return customers;
+    return customers.filter((customer) =>
+      [customer.name, customer.document_number, customer.phone, customer.email].some((value) => value?.toLowerCase().includes(term)),
+    );
+  }, [customerSearch, customers]);
 
   const visibleProducts = useMemo(() => {
     return products.filter((product) => {
@@ -147,9 +166,22 @@ export function POSPage() {
   );
   const taxPercentage = Number(businessSettings?.tax_percentage ?? 0);
   const tax = subtotal * taxPercentage / 100;
-  const total = subtotal + tax;
+  const totalBeforeDiscount = subtotal + tax;
+  const parsedDiscountValue = Number(discountValue || 0);
+  const discountNumericValue = Number.isFinite(parsedDiscountValue) ? parsedDiscountValue : 0;
+  const discountAmount = useMemo(() => {
+    if (discountType === "FIXED") {
+      return Math.max(discountNumericValue, 0);
+    }
+    if (discountType === "PERCENTAGE") {
+      return totalBeforeDiscount * Math.max(discountNumericValue, 0) / 100;
+    }
+    return 0;
+  }, [discountNumericValue, discountType, totalBeforeDiscount]);
+  const total = Math.max(totalBeforeDiscount - discountAmount, 0);
   const cashAmount = Number(cashReceived || 0);
   const cashChange = Math.max(cashAmount - total, 0);
+  const currencyCode = businessSettings?.currency ?? "COP";
 
   const addToCart = useCallback((product: Product) => {
     const stock = product.inventory?.quantity ?? 0;
@@ -181,13 +213,13 @@ export function POSPage() {
         addToCart(product);
         setMessage(`${product.name} agregado por código de barras.`);
       } catch {
-        setMessage("No se encontró un producto con ese código de barras.");
+        setScannedCode(barcodeValue);
+        setScanNotFoundModalOpen(true);
+        setMessage("No se encontró un producto activo con ese código.");
       }
     },
     [addToCart],
   );
-
-  const { barcodeBuffer, handleBarcodeChange } = useBarcodeScanner({ onScan: handleScan });
 
   function changeQuantity(productId: number, delta: number) {
     setCart((current) =>
@@ -222,6 +254,14 @@ export function POSPage() {
       setMessage(`Stock insuficiente para ${invalidStock.product.name}.`);
       return false;
     }
+    if (discountType === "FIXED" && (discountNumericValue <= 0 || discountNumericValue > totalBeforeDiscount)) {
+      setMessage("El descuento fijo debe ser mayor que 0 y no superar el subtotal más impuestos.");
+      return false;
+    }
+    if (discountType === "PERCENTAGE" && (discountNumericValue <= 0 || discountNumericValue > 100)) {
+      setMessage("El descuento porcentual debe ser mayor que 0 y menor o igual a 100.");
+      return false;
+    }
     return true;
   }
 
@@ -230,21 +270,23 @@ export function POSPage() {
     if (!validateSale()) {
       return;
     }
-    if (paymentMethod === "CASH") {
-      setCashReceived("");
-      setPaymentModalOpen(true);
-      return;
-    }
-    setPaymentDraft({ method: paymentMethod, receivedAmount: total, changeAmount: 0 });
-    setConfirmModalOpen(true);
+    setCashReceived("");
+    setPaymentModalOpen(true);
   }
 
-  function confirmCashPayment() {
-    if (cashAmount < total) {
+  function confirmPayment() {
+    if (!validateSale()) {
+      return;
+    }
+    if (paymentMethod === "CASH" && cashAmount < total) {
       setMessage("El valor recibido no puede ser menor al total de la venta.");
       return;
     }
-    setPaymentDraft({ method: "CASH", receivedAmount: cashAmount, changeAmount: cashChange });
+    setPaymentDraft({
+      method: paymentMethod,
+      receivedAmount: paymentMethod === "CASH" ? cashAmount : total,
+      changeAmount: paymentMethod === "CASH" ? cashChange : 0,
+    });
     setPaymentModalOpen(false);
     setConfirmModalOpen(true);
   }
@@ -266,6 +308,8 @@ export function POSPage() {
           method: paymentDraft.method,
           amount: paymentDraft.receivedAmount.toFixed(2),
         },
+        tipo_descuento: discountType,
+        valor_descuento: discountType === "NONE" ? "0.00" : discountNumericValue.toFixed(2),
       });
       const receiptData: ReceiptData = {
         sale: saleResponse,
@@ -277,6 +321,7 @@ export function POSPage() {
         changeAmount: paymentDraft.changeAmount,
         subtotal: Number(saleResponse.subtotal),
         tax: Number(saleResponse.tax_amount ?? saleResponse.tax),
+        discount: Number(saleResponse.monto_descuento ?? 0),
         total: Number(saleResponse.total),
         businessSettings: currentBusinessSettings,
         logoUrl: logoImg,
@@ -284,6 +329,8 @@ export function POSPage() {
       setReceipt(receiptData);
       setCart([]);
       setCashReceived("");
+      setDiscountType("NONE");
+      setDiscountValue("");
       setPaymentDraft(null);
       setConfirmModalOpen(false);
       setMessage("Venta registrada correctamente.");
@@ -296,18 +343,7 @@ export function POSPage() {
   }
 
   function openCreateCustomerModal() {
-    setEditingCustomer(null);
     setCustomerForm(emptyCustomerForm);
-    setCustomerModalOpen(true);
-  }
-
-  function openEditDefaultCustomerModal() {
-    const customer = defaultCustomer ?? selectedCustomer;
-    if (!customer) {
-      return;
-    }
-    setEditingCustomer(customer);
-    setCustomerForm(customerToPayload(customer));
     setCustomerModalOpen(true);
   }
 
@@ -316,13 +352,65 @@ export function POSPage() {
       setMessage("El nombre y documento del cliente son obligatorios.");
       return;
     }
-    const customer = editingCustomer
-      ? await updateCustomer(editingCustomer.id, customerForm)
-      : await createCustomer(customerForm);
+    const customer = await createCustomer(customerForm);
     await loadCustomers();
     setSelectedCustomerId(customer.id);
     setCustomerModalOpen(false);
-    setMessage(editingCustomer ? "Cliente actualizado." : "Cliente creado.");
+    setMessage("Cliente creado.");
+  }
+
+  async function openCustomerHistory() {
+    if (!selectedCustomer) {
+      setMessage("Selecciona un cliente para consultar su historial.");
+      return;
+    }
+    setCustomerHistoryOpen(true);
+    setCustomerHistoryLoading(true);
+    try {
+      setCustomerHistory(await getCustomerHistory(selectedCustomer.id));
+    } catch {
+      setMessage("No fue posible cargar el historial del cliente.");
+    } finally {
+      setCustomerHistoryLoading(false);
+    }
+  }
+
+  async function saveCategory() {
+    const name = newCategoryName.trim();
+    if (!name) {
+      return;
+    }
+    const category = await createCategory({ name });
+    setCategories((current) => [...current, category].sort((a, b) => a.name.localeCompare(b.name)));
+    setProductForm((current) => ({ ...current, category_id: category.id }));
+    setNewCategoryName("");
+  }
+
+  function openScannedProductForm() {
+    setProductForm({
+      ...emptyProductForm,
+      barcode: scannedCode.length <= 80 ? scannedCode : "",
+      qr_code: scannedCode.length > 80 ? scannedCode : "",
+    });
+    setScanNotFoundModalOpen(false);
+    setProductModalOpen(true);
+  }
+
+  async function saveScannedProduct() {
+    if (!productForm.name || !productForm.sku || !productForm.price || !productForm.cost) {
+      setMessage("Completa nombre, SKU, precio de venta y precio de compra.");
+      return;
+    }
+    const product = await createProduct({
+      ...productForm,
+      barcode: productForm.barcode || undefined,
+      qr_code: productForm.qr_code || undefined,
+      category_id: productForm.category_id || undefined,
+    });
+    setProductModalOpen(false);
+    setMessage("Producto creado desde el código escaneado.");
+    await loadProducts();
+    addToCart(product);
   }
 
   return (
@@ -364,16 +452,7 @@ export function POSPage() {
                 placeholder="Buscar productos..."
               />
             </label>
-            <label className="relative">
-              <Barcode className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
-              <input
-                value={barcodeBuffer}
-                onChange={(event) => handleBarcodeChange(event.target.value)}
-                className="h-12 w-full rounded-lg border border-gray-300 bg-white pl-11 pr-4 outline-none focus:ring-2 focus:ring-[#1B8A5A]"
-                placeholder="Código de barras"
-                autoFocus
-              />
-            </label>
+            <BarcodeScannerInput onScan={handleScan} placeholder="Código de barras o QR" />
           </div>
 
           {message && <p className="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-800">{message}</p>}
@@ -411,7 +490,7 @@ export function POSPage() {
                         <p className="text-xs text-gray-500">{product.sku}</p>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-lg font-bold text-[#1B8A5A]">{currency(Number(product.price))}</span>
+                        <span className="text-lg font-bold text-[#1B8A5A]">{formatMoney(product.price, currencyCode)}</span>
                         <span className={`text-xs ${stock <= 0 ? "text-red-600" : product.inventory?.low_stock ? "text-amber-600" : "text-gray-500"}`}>
                           {stock} unidades
                         </span>
@@ -442,23 +521,32 @@ export function POSPage() {
 
         <div className="space-y-3 border-b border-gray-200 p-5">
           <label className="block text-sm font-medium text-gray-700">Cliente</label>
+          <label className="relative block">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              value={customerSearch}
+              onChange={(event) => setCustomerSearch(event.target.value)}
+              placeholder="Buscar cliente por nombre o documento"
+              className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+            />
+          </label>
           <div className="flex gap-2">
             <select
               value={selectedCustomerId}
               onChange={(event) => setSelectedCustomerId(Number(event.target.value))}
               className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#1B8A5A]"
             >
-              {customers.map((customer) => (
+              {filteredCustomers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.name}
+                  {customer.name}{customer.id === defaultCustomer?.id ? " (predeterminado)" : ""}
                 </option>
               ))}
             </select>
             <button onClick={openCreateCustomerModal} className="rounded-lg border border-gray-300 p-2 hover:bg-gray-50" aria-label="Crear cliente">
               <Plus className="h-4 w-4" />
             </button>
-            <button onClick={openEditDefaultCustomerModal} className="rounded-lg border border-gray-300 p-2 hover:bg-gray-50" aria-label="Editar cliente predeterminado">
-              <UserRound className="h-4 w-4" />
+            <button onClick={openCustomerHistory} className="rounded-lg border border-gray-300 p-2 hover:bg-gray-50" aria-label="Ver historial del cliente">
+              <Eye className="h-4 w-4" />
             </button>
           </div>
           <p className="text-xs text-gray-500">Usa el cliente predeterminado o registra uno antes de facturar.</p>
@@ -478,7 +566,7 @@ export function POSPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="line-clamp-1 text-sm font-medium text-gray-900">{item.product.name}</p>
-                      <p className="text-sm font-semibold text-[#1B8A5A]">{currency(Number(item.product.price))}</p>
+                      <p className="text-sm font-semibold text-[#1B8A5A]">{formatMoney(item.product.price, currencyCode)}</p>
                     </div>
                     <button onClick={() => changeQuantity(item.product.id, -item.quantity)} className="rounded-md p-1.5 text-red-600 hover:bg-red-50" aria-label="Eliminar producto">
                       <Trash2 className="h-4 w-4" />
@@ -494,7 +582,7 @@ export function POSPage() {
                         <Plus className="h-4 w-4" />
                       </button>
                     </div>
-                    <span className="font-semibold text-gray-900">{currency(Number(item.product.price) * item.quantity)}</span>
+                    <span className="font-semibold text-gray-900">{formatMoney(Number(item.product.price) * item.quantity, currencyCode)}</span>
                   </div>
                 </div>
               ))}
@@ -506,15 +594,19 @@ export function POSPage() {
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Subtotal</span>
-              <span className="font-medium text-gray-900">{currency(subtotal)}</span>
+              <span className="font-medium text-gray-900">{formatMoney(subtotal, currencyCode)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Impuestos ({taxPercentage.toFixed(2)}%)</span>
-              <span className="font-medium text-gray-900">{currency(tax)}</span>
+              <span className="font-medium text-gray-900">{formatMoney(tax, currencyCode)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Descuento</span>
+              <span className="font-medium text-gray-900">-{formatMoney(discountAmount, currencyCode)}</span>
             </div>
             <div className="flex justify-between border-t border-gray-200 pt-3">
-              <span className="text-lg font-semibold text-gray-900">Total</span>
-              <span className="text-2xl font-bold text-[#1B8A5A]">{currency(total)}</span>
+              <span className="text-lg font-semibold text-gray-900">Total final</span>
+              <span className="text-2xl font-bold text-[#1B8A5A]">{formatMoney(total, currencyCode)}</span>
             </div>
           </div>
 
@@ -549,31 +641,68 @@ export function POSPage() {
         </div>
       </aside>
 
-      <ReusableModal open={paymentModalOpen} title="Pago en efectivo" onClose={() => setPaymentModalOpen(false)}>
+      <ReusableModal open={paymentModalOpen} title="Procesar pago" onClose={() => setPaymentModalOpen(false)}>
         <div className="space-y-5">
           <div className="rounded-lg bg-emerald-50 p-4 text-center">
-            <p className="text-sm text-gray-500">Total a pagar</p>
-            <p className="text-4xl font-bold text-[#1B8A5A]">{currency(total)}</p>
+            <p className="text-sm text-gray-500">Total final a pagar</p>
+            <p className="text-4xl font-bold text-[#1B8A5A]">{formatMoney(total, currencyCode)}</p>
           </div>
-          <label className="block">
-            <span className="mb-2 block text-sm font-medium text-gray-700">Valor recibido</span>
-            <input
-              value={cashReceived}
-              onChange={(event) => setCashReceived(event.target.value)}
-              type="number"
-              min="0"
-              step="0.01"
-              className="w-full rounded-lg border border-gray-300 px-3 py-3 text-lg font-semibold outline-none focus:ring-2 focus:ring-[#1B8A5A]"
-              placeholder="0.00"
-            />
-          </label>
-          <div className={`rounded-lg p-4 ${cashAmount >= total ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"}`}>
-            <p className="text-sm">Cambio</p>
-            <p className="text-2xl font-bold">{cashAmount >= total ? currency(cashChange) : "Valor insuficiente"}</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-gray-700">Tipo de descuento</span>
+              <select
+                value={discountType}
+                onChange={(event) => {
+                  setDiscountType(event.target.value as DiscountType);
+                  setDiscountValue("");
+                }}
+                className="w-full rounded-lg border border-gray-300 px-3 py-3 outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+              >
+                <option value="NONE">Sin descuento</option>
+                <option value="FIXED">Valor fijo</option>
+                <option value="PERCENTAGE">Porcentaje</option>
+              </select>
+            </label>
+            {discountType !== "NONE" && (
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-gray-700">{discountType === "FIXED" ? "Valor descuento" : "Porcentaje descuento"}</span>
+                <input
+                  value={discountType === "FIXED" ? formatMoneyInput(discountValue, currencyCode) : discountValue}
+                  onChange={(event) => setDiscountValue(discountType === "FIXED" ? parseMoneyInput(event.target.value) : event.target.value.replace(/[^\d.]/g, ""))}
+                  inputMode="decimal"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-3 text-lg font-semibold outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+                  placeholder={discountType === "FIXED" ? "0" : "0%"}
+                />
+              </label>
+            )}
           </div>
+          <div className="rounded-lg border border-gray-200 p-4 text-sm">
+            <div className="flex justify-between"><span>Subtotal</span><strong>{formatMoney(subtotal, currencyCode)}</strong></div>
+            <div className="flex justify-between"><span>Impuesto</span><strong>{formatMoney(tax, currencyCode)}</strong></div>
+            <div className="flex justify-between"><span>Descuento</span><strong>-{formatMoney(discountAmount, currencyCode)}</strong></div>
+            <div className="flex justify-between border-t border-gray-200 pt-2 text-base"><span>Total final</span><strong>{formatMoney(total, currencyCode)}</strong></div>
+          </div>
+          {paymentMethod === "CASH" && (
+            <>
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-gray-700">Valor recibido</span>
+                <input
+                  value={formatMoneyInput(cashReceived, currencyCode)}
+                  onChange={(event) => setCashReceived(parseMoneyInput(event.target.value))}
+                  inputMode="decimal"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-3 text-lg font-semibold outline-none focus:ring-2 focus:ring-[#1B8A5A]"
+                  placeholder="0"
+                />
+              </label>
+              <div className={`rounded-lg p-4 ${cashAmount >= total ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"}`}>
+                <p className="text-sm">Cambio</p>
+                <p className="text-2xl font-bold">{cashAmount >= total ? formatMoney(cashChange, currencyCode) : "Valor insuficiente"}</p>
+              </div>
+            </>
+          )}
           <button
-            onClick={confirmCashPayment}
-            disabled={cashAmount < total}
+            onClick={confirmPayment}
+            disabled={paymentMethod === "CASH" && cashAmount < total}
             className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             Confirmar Pago
@@ -588,9 +717,10 @@ export function POSPage() {
             <div className="flex justify-between"><span>Cliente</span><strong>{selectedCustomer?.name}</strong></div>
             <div className="flex justify-between"><span>Método</span><strong>{paymentDraft?.method === "CASH" ? "Efectivo" : paymentDraft?.method === "CARD" ? "Tarjeta" : "Transferencia"}</strong></div>
             <div className="flex justify-between"><span>Impuesto aplicado</span><strong>{taxPercentage.toFixed(2)}%</strong></div>
-            <div className="flex justify-between"><span>Total</span><strong>{currency(total)}</strong></div>
-            <div className="flex justify-between"><span>Recibido</span><strong>{currency(paymentDraft?.receivedAmount ?? 0)}</strong></div>
-            <div className="flex justify-between"><span>Cambio</span><strong>{currency(paymentDraft?.changeAmount ?? 0)}</strong></div>
+            <div className="flex justify-between"><span>Descuento</span><strong>-{formatMoney(discountAmount, currencyCode)}</strong></div>
+            <div className="flex justify-between"><span>Total final</span><strong>{formatMoney(total, currencyCode)}</strong></div>
+            <div className="flex justify-between"><span>Recibido</span><strong>{formatMoney(paymentDraft?.receivedAmount ?? 0, currencyCode)}</strong></div>
+            <div className="flex justify-between"><span>Cambio</span><strong>{formatMoney(paymentDraft?.changeAmount ?? 0, currencyCode)}</strong></div>
           </div>
           <button onClick={confirmSale} disabled={loadingSale} className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] disabled:opacity-70">
             {loadingSale ? "Registrando venta..." : "Registrar venta"}
@@ -598,7 +728,54 @@ export function POSPage() {
         </div>
       </ReusableModal>
 
-      <ReusableModal open={customerModalOpen} title={editingCustomer ? "Editar cliente" : "Crear cliente"} onClose={() => setCustomerModalOpen(false)}>
+      <ReusableModal open={scanNotFoundModalOpen} title="Código no encontrado" onClose={() => setScanNotFoundModalOpen(false)}>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Código capturado</p>
+            <p className="mt-1 break-all font-semibold text-gray-900">{scannedCode}</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <button onClick={() => handleScan(scannedCode)} className="rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+              Buscar nuevamente
+            </button>
+            {role === "ADMIN" && (
+              <button onClick={openScannedProductForm} className="rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">
+                Crear producto
+              </button>
+            )}
+            <button onClick={() => setScanNotFoundModalOpen(false)} className="rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </ReusableModal>
+
+      <ReusableModal open={productModalOpen} title="Crear producto escaneado" onClose={() => setProductModalOpen(false)}>
+        <form onSubmit={(event) => { event.preventDefault(); saveScannedProduct(); }} className="grid gap-3 md:grid-cols-2">
+          <input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Nombre" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={productForm.sku} onChange={(event) => setProductForm({ ...productForm, sku: event.target.value })} placeholder="SKU" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={productForm.barcode ?? ""} onChange={(event) => setProductForm({ ...productForm, barcode: event.target.value })} placeholder="Código de barras" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={productForm.qr_code ?? ""} onChange={(event) => setProductForm({ ...productForm, qr_code: event.target.value })} placeholder="Código QR como texto" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={formatMoneyInput(productForm.price, currencyCode)} onChange={(event) => setProductForm({ ...productForm, price: parseMoneyInput(event.target.value) })} inputMode="decimal" placeholder="Precio de venta" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input value={formatMoneyInput(productForm.cost, currencyCode)} onChange={(event) => setProductForm({ ...productForm, cost: parseMoneyInput(event.target.value) })} inputMode="decimal" placeholder="Precio de compra" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <select value={productForm.category_id ?? ""} onChange={(event) => setProductForm({ ...productForm, category_id: event.target.value ? Number(event.target.value) : null })} className="rounded-lg border border-gray-300 px-3 py-2">
+            <option value="">Sin categoría</option>
+            {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+          </select>
+          <div className="flex gap-2">
+            <input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Nueva categoría" className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2" />
+            <button type="button" onClick={saveCategory} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Crear</button>
+          </div>
+          <input type="number" value={productForm.initial_stock} onChange={(event) => setProductForm({ ...productForm, initial_stock: Number(event.target.value) })} placeholder="Stock" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <input type="number" value={productForm.minimum_stock} onChange={(event) => setProductForm({ ...productForm, minimum_stock: Number(event.target.value) })} placeholder="Stock mínimo" className="rounded-lg border border-gray-300 px-3 py-2" />
+          <textarea value={productForm.description ?? ""} onChange={(event) => setProductForm({ ...productForm, description: event.target.value })} placeholder="Descripción" className="rounded-lg border border-gray-300 px-3 py-2 md:col-span-2" />
+          <button className="rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] md:col-span-2">
+            Guardar producto
+          </button>
+        </form>
+      </ReusableModal>
+
+      <ReusableModal open={customerModalOpen} title="Crear cliente" onClose={() => setCustomerModalOpen(false)}>
         <div className="grid gap-3 md:grid-cols-2">
           <input value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} placeholder="Nombre" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input value={customerForm.document_number ?? ""} onChange={(event) => setCustomerForm({ ...customerForm, document_number: event.target.value })} placeholder="Documento" className="rounded-lg border border-gray-300 px-3 py-2" />
@@ -611,6 +788,41 @@ export function POSPage() {
         </div>
       </ReusableModal>
 
+      <ReusableModal open={customerHistoryOpen} title={selectedCustomer ? `Historial de ${selectedCustomer.name}` : "Historial del cliente"} onClose={() => setCustomerHistoryOpen(false)}>
+        <div className="space-y-4">
+          {customerHistoryLoading && <p className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700">Cargando historial...</p>}
+          <div className="max-h-[420px] overflow-y-auto rounded-lg border border-gray-200">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-3 py-3">Venta</th>
+                  <th className="px-3 py-3">Fecha</th>
+                  <th className="px-3 py-3">Productos</th>
+                  <th className="px-3 py-3">Pago</th>
+                  <th className="px-3 py-3">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {customerHistory.map((sale) => (
+                  <tr key={sale.id}>
+                    <td className="px-3 py-3 font-medium">{sale.sale_number}</td>
+                    <td className="px-3 py-3">{new Date(sale.date).toLocaleString()}</td>
+                    <td className="px-3 py-3">{sale.products.map((product) => product.name).join(", ")}</td>
+                    <td className="px-3 py-3">{sale.payment_method === "CASH" ? "Efectivo" : sale.payment_method === "CARD" ? "Tarjeta" : "Transferencia"}</td>
+                    <td className="px-3 py-3 font-semibold text-[#1B8A5A]">{formatMoney(sale.total, currencyCode)}</td>
+                  </tr>
+                ))}
+                {!customerHistoryLoading && customerHistory.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-8 text-center text-gray-500">Este cliente no tiene compras registradas.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </ReusableModal>
+
       <ReusableModal open={Boolean(receipt)} title="Venta registrada correctamente" onClose={() => setReceipt(null)}>
         <div className="space-y-4">
           <div className="flex items-center gap-3 rounded-lg bg-emerald-50 p-4 text-emerald-800">
@@ -618,13 +830,10 @@ export function POSPage() {
             <p className="text-sm font-medium">¿Desea imprimir o guardar el recibo?</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <button onClick={() => receipt && openReceiptWindow(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
-              <Eye className="h-4 w-4" /> Ver recibo
-            </button>
             <button onClick={() => receipt && downloadReceiptPdf(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
               <Download className="h-4 w-4" /> Guardar PDF
             </button>
-            <button onClick={() => receipt && openReceiptWindow(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+            <button onClick={() => receipt && printReceiptPdf(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
               <Printer className="h-4 w-4" /> Imprimir
             </button>
             <button onClick={() => setReceipt(null)} className="rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">

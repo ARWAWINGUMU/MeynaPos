@@ -24,7 +24,7 @@ def list_products(
     return ProductService(ProductRepository(db)).list_products(search, category_id, include_inactive)
 
 
-@router.get("/barcode/{barcode}", response_model=ProductRead)
+@router.get("/barcode/{barcode:path}", response_model=ProductRead)
 def get_by_barcode(
     barcode: str,
     db: Session = Depends(get_db),
