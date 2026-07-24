@@ -22,8 +22,13 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt
 
+      - name: Create test media directory
+        run: mkdir -p /tmp/meynapos-media/products
+
       - name: Run backend tests
         working-directory: backend
+        env:
+          MEDIA_ROOT: /tmp/meynapos-media
         run: pytest
 
       - name: Build backend Docker image
@@ -50,4 +55,3 @@ jobs:
 
       - name: Build frontend Docker image
         run: docker build -t meynapos-frontend:ci ./frontend
-
