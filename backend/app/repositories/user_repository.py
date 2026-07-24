@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -11,6 +13,10 @@ class UserRepository:
 
     def get_by_email(self, email: str) -> User | None:
         statement = select(User).options(joinedload(User.role)).where(User.email == email)
+        return self.db.scalars(statement).first()
+
+    def get_by_username(self, username: str) -> User | None:
+        statement = select(User).options(joinedload(User.role)).where(User.username == username)
         return self.db.scalars(statement).first()
 
     def get_by_identifier(self, identifier: str) -> User | None:
@@ -36,6 +42,10 @@ class UserRepository:
             statement = statement.where(User.is_active.is_(False))
         elif status == "locked":
             statement = statement.where(User.locked.is_(True))
+        elif status == "password_pending":
+            statement = statement.where(User.must_change_password.is_(True))
+        elif status == "temporary_expired":
+            statement = statement.where(User.must_change_password.is_(True), User.temporary_password_expires_at <= datetime.now(timezone.utc))
         return list(self.db.scalars(statement).unique().all())
 
     def get(self, user_id: int) -> User | None:

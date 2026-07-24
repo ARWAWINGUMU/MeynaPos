@@ -5,6 +5,7 @@ from app.database.session import get_db
 from app.dependencies.auth import require_roles
 from app.models.role import RoleName
 from app.models.user import User
+from app.schemas.auth import MessageResponse
 from app.repositories.category_repository import CategoryRepository
 from app.schemas.category import CategoryCreate, CategoryRead, CategoryUpdate
 from app.services.category_service import CategoryService
@@ -57,3 +58,12 @@ def deactivate_category(
     _: User = Depends(require_roles(RoleName.ADMIN)),
 ) -> CategoryRead:
     return CategoryService(CategoryRepository(db)).set_active(category_id, False)
+
+
+@router.delete("/{category_id}", response_model=MessageResponse)
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(RoleName.ADMIN)),
+) -> MessageResponse:
+    return CategoryService(CategoryRepository(db)).delete_category(category_id)

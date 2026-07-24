@@ -8,6 +8,8 @@ class InventoryRead(BaseModel):
     minimum_stock: int
     low_stock: bool
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class ProductBase(BaseModel):
     name: str = Field(min_length=2, max_length=160)
@@ -53,3 +55,9 @@ class ProductRead(ProductBase):
     inventory: InventoryRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProductRemovalResponse(BaseModel):
+    action: str
+    product: ProductRead | None = None
+    history_preserved: bool = True

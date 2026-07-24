@@ -28,3 +28,21 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     role: str
     full_name: str
+    user_id: int
+    must_change_password: bool = False
+
+
+class ChangeRequiredPasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+    confirm_password: str = Field(min_length=8)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+    confirm_password: str = Field(min_length=8)
+
+
+class MessageResponse(BaseModel):
+    message: str

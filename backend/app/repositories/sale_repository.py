@@ -22,3 +22,10 @@ class SaleRepository:
         )
         return list(self.db.scalars(statement).unique().all())
 
+    def get(self, sale_id: int) -> Sale | None:
+        statement = (
+            select(Sale)
+            .options(joinedload(Sale.details), joinedload(Sale.payment), joinedload(Sale.cashier), joinedload(Sale.customer))
+            .where(Sale.id == sale_id)
+        )
+        return self.db.scalars(statement).unique().first()

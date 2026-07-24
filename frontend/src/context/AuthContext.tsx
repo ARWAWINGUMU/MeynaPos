@@ -10,7 +10,8 @@ interface AuthContextValue {
   fullName: string | null;
   role: AuthSession["user"]["role"] | null;
   isAuthenticated: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  mustChangePassword: boolean;
+  login: (credentials: LoginCredentials) => Promise<AuthSession>;
   logout: () => void;
 }
 
@@ -57,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (credentials: LoginCredentials) => {
     const authenticatedSession = await AuthService.login(credentials);
     setSession(authenticatedSession);
+    return authenticatedSession;
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -66,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       fullName: session?.user.name ?? null,
       role: session?.user.role ?? null,
       isAuthenticated: Boolean(session),
+      mustChangePassword: Boolean(session?.mustChangePassword),
       login,
       logout,
     }),

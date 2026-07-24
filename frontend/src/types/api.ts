@@ -30,11 +30,18 @@ export interface Product {
   inventory?: Inventory | null;
 }
 
+export interface ProductRemovalResponse {
+  action: "deleted" | "deactivated" | "permanently_deleted";
+  product: Product | null;
+  history_preserved: boolean;
+}
+
 export interface Category {
   id: number;
   name: string;
   description?: string | null;
   is_active: boolean;
+  product_count: number;
 }
 
 export interface CartItem {
@@ -71,6 +78,15 @@ export interface SaleResponse {
   monto_descuento: string;
   total: string;
   created_at: string;
+  details: Array<{
+    product_id: number | null;
+    product_name: string;
+    product_sku?: string | null;
+    product_barcode?: string | null;
+    quantity: number;
+    unit_price: string;
+    line_total: string;
+  }>;
   payment: {
     method: PaymentMethod;
     amount: string;
@@ -103,6 +119,7 @@ export interface DashboardSummary {
 }
 
 export interface SalesReportItem {
+  sale_id: number;
   sale_number: string;
   date: string;
   cashier: string;
@@ -115,8 +132,16 @@ export interface SalesReportItem {
   status: string;
 }
 
+export interface PaginatedSalesReport {
+  items: SalesReportItem[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
 export interface TopProductReportItem {
-  product_id: number;
+  product_id: number | null;
   name: string;
   quantity_sold: number;
   total: string;

@@ -18,10 +18,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return password_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, token_version: int = 0, password_change_required: bool = False) -> str:
     settings = get_settings()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload: dict[str, Any] = {"sub": subject, "role": role, "exp": expires_at}
+    payload: dict[str, Any] = {
+        "sub": subject,
+        "role": role,
+        "token_version": token_version,
+        "password_change_required": password_change_required,
+        "exp": expires_at,
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
@@ -31,4 +37,3 @@ def decode_access_token(token: str) -> dict[str, Any]:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
     except JWTError as exc:
         raise ValueError("Invalid authentication token") from exc
-

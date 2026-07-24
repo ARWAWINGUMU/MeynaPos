@@ -28,3 +28,11 @@ def list_sales(
 ) -> list[SaleRead]:
     return SaleService(db).list_sales()
 
+
+@router.get("/{sale_id}", response_model=SaleRead)
+def get_sale(
+    sale_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(RoleName.ADMIN, RoleName.CASHIER)),
+) -> SaleRead:
+    return SaleService(db).get_sale(sale_id)

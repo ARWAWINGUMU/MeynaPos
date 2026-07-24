@@ -162,7 +162,7 @@ export function DashboardPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {topProducts.slice(0, 6).map((item) => (
-                <div key={item.product_id} className="rounded-lg border border-gray-200 p-4">
+                <div key={`${item.product_id ?? "historical"}-${item.name}`} className="rounded-lg border border-gray-200 p-4">
                   <p className="font-medium text-gray-900">{item.name}</p>
                   <p className="mt-1 text-sm text-gray-500">{item.quantity_sold} unidades vendidas</p>
                   <p className="mt-2 font-semibold text-[#047857]">{formatMoney(item.total, currency)}</p>

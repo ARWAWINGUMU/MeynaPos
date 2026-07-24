@@ -20,3 +20,8 @@ export async function setCategoryActive(id: number, active: boolean): Promise<Ca
   const response = await api.patch<Category>(`/categories/${id}/${active ? "activate" : "deactivate"}`);
   return response.data;
 }
+
+export async function deleteCategory(id: number): Promise<string> {
+  const response = await api.delete<{ message: string }>(`/categories/${id}`);
+  return response.data.message;
+}

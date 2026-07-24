@@ -62,7 +62,7 @@ function buildAuthDialog(error: unknown): AuthDialogState {
 }
 
 export function LoginPage() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, login, mustChangePassword } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState<LoginFormState>(initialFormState);
   const [showPassword, setShowPassword] = useState(false);
@@ -72,7 +72,7 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={mustChangePassword ? "/change-password" : "/"} replace />;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -87,12 +87,12 @@ export function LoginPage() {
     setError(null);
     setDialog(null);
     try {
-      await login({
+      const session = await login({
         username: form.username.trim(),
         password: form.password,
         captchaToken: turnstileToken,
       });
-      navigate("/", { replace: true });
+      navigate(session.mustChangePassword ? "/change-password" : "/", { replace: true });
     } catch (loginError) {
       const nextDialog = buildAuthDialog(loginError);
       setDialog(nextDialog);

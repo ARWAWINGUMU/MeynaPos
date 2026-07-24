@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,19 @@ class CategoryRepository:
         if not include_inactive:
             statement = statement.where(Category.is_active.is_(True))
         return list(self.db.scalars(statement).all())
+
+    def list_with_product_counts(self, include_inactive: bool = False) -> list[tuple[Category, int]]:
+        from app.models.product import Product
+
+        statement = (
+            select(Category, func.count(Product.id))
+            .outerjoin(Product, Product.category_id == Category.id)
+            .group_by(Category.id, Category.name, Category.description, Category.is_active)
+            .order_by(Category.name)
+        )
+        if not include_inactive:
+            statement = statement.where(Category.is_active.is_(True))
+        return [(row[0], int(row[1])) for row in self.db.execute(statement).all()]
 
     def get(self, category_id: int) -> Category | None:
         return self.db.get(Category, category_id)
@@ -35,3 +50,7 @@ class CategoryRepository:
         self.db.commit()
         self.db.refresh(category)
         return category
+
+    def delete(self, category: Category) -> None:
+        self.db.delete(category)
+        self.db.commit()

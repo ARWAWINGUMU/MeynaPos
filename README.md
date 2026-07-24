@@ -18,6 +18,9 @@ Environment:
 
 - Copy `.env.example` to `.env` for Docker deployments.
 - Set a strong `SECRET_KEY` and database password before production use.
+- Set `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD`, and `INITIAL_ADMIN_NAME` before the first deployment.
+- In production, never keep `INITIAL_ADMIN_PASSWORD=change-me`.
+- Set `BUSINESS_NAME` and `BUSINESS_NIT` to show the real business identity in the application header.
 - Keep `DATABASE_URL` pointing to `db` inside Docker: `postgresql+psycopg://USER:PASSWORD@db:5432/DB`.
 - `VITE_API_URL` must point to the browser-accessible backend API, by default `http://localhost:8000/api`.
 - Media files are stored in the named Docker volume `pos_media_data` and served through `/media`.
@@ -77,8 +80,15 @@ Required design patterns are implemented:
 ## Main Features
 
 - JWT login with role-based authorization.
+- Centralized visual toast notifications for success, error, warning, and information messages.
 - Roles: `ADMIN` and `CASHIER`.
 - Product CRUD with SKU and barcode support.
+- Product removal protected by administrator reauthentication.
+- Products can be deactivated while preserving all historical records.
+- Permanent product deletion preserves sale history through immutable sale-detail snapshots.
+- Permanent deletion is rejected when purchase history cannot be safely snapshotted; administrators should deactivate the product instead.
+- Inactive products are hidden by default and can be listed or reactivated by administrators.
+- Categories show their product count and can only be deleted when no products are associated.
 - Barcode scanner workflow for keyboard-emulating scanners.
 - Inventory stock validation and low stock alerts.
 - Sales creation with automatic totals and stock decrement.
@@ -141,12 +151,14 @@ Interactive API documentation:
 http://localhost:8000/docs
 ```
 
-Default seeded admin account:
+Initial administrator:
 
 ```text
-Email: admin@meynapos.com
-Password: Admin123!
+Email: configured with INITIAL_ADMIN_EMAIL
+Temporary password: configured with INITIAL_ADMIN_PASSWORD
 ```
+
+The initial password is temporary. On first login the administrator must define a personal password before accessing the dashboard or any functional module.
 
 ### Frontend
 
@@ -186,18 +198,33 @@ Backend:
 | `ENVIRONMENT` | Runtime environment | `development` |
 | `DATABASE_URL` | SQLAlchemy database URL | `postgresql+psycopg://meynapos:meynapos@localhost:5432/meynapos` |
 | `SECRET_KEY` | JWT signing key | `replace-with-a-strong-secret` |
+| `INITIAL_ADMIN_EMAIL` | First administrator email, used only when no admin exists | `admin@meynapos.com` |
+| `INITIAL_ADMIN_PASSWORD` | First administrator temporary password | `change-me` |
+| `INITIAL_ADMIN_NAME` | First administrator display name | `Administrador` |
+| `TEMP_PASSWORD_EXPIRE_HOURS` | Expiration window for temporary passwords created after setup | `24` |
+| `BUSINESS_NAME` | Business name displayed in the application header and seeded in business settings | `MeynaPOS` |
+| `BUSINESS_NIT` | Business tax identifier displayed in the application header and seeded in business settings | `000000000-0` |
+| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile server-side verification key | `1x0000000000000000000000000000000AA` |
+| `RECAPTCHA_SECRET_KEY` | Optional Google reCAPTCHA fallback secret | empty |
+| `MEDIA_ROOT` | Persistent media storage path inside the backend container | `/app/media` |
+| `MEDIA_URL_PREFIX` | Public URL prefix for served media files | `/media` |
+| `MAX_UPLOAD_SIZE_BYTES` | Maximum accepted upload size for images | `5242880` |
 
 Frontend:
 
 | Variable | Description | Example |
 | --- | --- | --- |
 | `VITE_API_URL` | Backend API base URL | `http://localhost:8000/api` |
+| `VITE_TURNSTILE_SITE_KEY` | Cloudflare Turnstile public site key | `1x00000000000000000000AA` |
+| `VITE_RECAPTCHA_SITE_KEY` | Optional Google reCAPTCHA fallback site key | empty |
 
 ## API Endpoints
 
 Authentication:
 
 - `POST /api/auth/login`
+- `POST /api/auth/change-required-password`
+- `POST /api/auth/change-password`
 
 Products:
 
@@ -206,6 +233,17 @@ Products:
 - `POST /api/products`
 - `PUT /api/products/{id}`
 - `DELETE /api/products/{id}`
+- `POST /api/products/{id}/remove`
+- `PATCH /api/products/{id}/deactivate`
+- `DELETE /api/products/{id}/permanent`
+- `PATCH /api/products/{id}/reactivate`
+
+Categories:
+
+- `GET /api/categories`
+- `POST /api/categories`
+- `PUT /api/categories/{id}`
+- `DELETE /api/categories/{id}`
 
 Sales:
 
@@ -214,8 +252,10 @@ Sales:
 
 Reports:
 
-- `GET /api/reports/sales`
+- `GET /api/reports/sales?page=1&page_size=20`
 - `GET /api/reports/inventory`
+
+The sales report is paginated, ordered by newest records first using `created_at desc, id desc`, and returns `items`, `page`, `page_size`, `total`, and `total_pages`.
 
 ## Database Migrations
 
@@ -246,8 +286,27 @@ pytest
 The test suite includes:
 
 - Authentication unit/integration coverage.
+- Temporary password, mandatory change, reset, and token invalidation coverage.
 - Product creation and barcode lookup integration tests.
 - Sale creation and automatic inventory decrement integration tests.
+
+## Temporary Passwords and Mandatory Password Change
+
+MeynaPOS uses temporary passwords for first access, user creation, and administrator password resets.
+
+- The first administrator is created by the seed process only if no administrator exists.
+- The seed reads `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD`, and `INITIAL_ADMIN_NAME`.
+- The first administrator password is stored only as a bcrypt hash and starts with `must_change_password=true`.
+- The seed is idempotent: it does not duplicate administrators, reset passwords, or overwrite later profile changes.
+- Users created by an administrator receive a temporary password. If the administrator leaves the field empty, the backend generates a cryptographically secure password and returns it once.
+- Password resets require the current administrator password in the request.
+- Temporary passwords expire after `TEMP_PASSWORD_EXPIRE_HOURS`, except the initial administrator password before the first mandatory change.
+- Login with a temporary password returns `must_change_password=true` and a limited JWT.
+- Limited JWTs cannot access dashboard, sales, inventory, reports, users, or other functional endpoints.
+- The only allowed flow is `POST /api/auth/change-required-password`.
+- After the user defines a personal password, the backend increments `token_version`, clears the temporary state, and the frontend closes the session.
+- The user must log in again with the new password.
+- Passwords are never logged, returned by public endpoints, or stored in plain text.
 
 ## Barcode Scanner Support
 

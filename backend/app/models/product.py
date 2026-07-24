@@ -27,4 +27,4 @@ class Product(Base):
     category: Mapped["Category | None"] = relationship(back_populates="products")
     supplier: Mapped["Supplier | None"] = relationship(back_populates="products")
     inventory: Mapped["Inventory"] = relationship(back_populates="product", uselist=False, cascade="all, delete-orphan")
-    sale_details: Mapped[list["SaleDetail"]] = relationship(back_populates="product")
+    sale_details: Mapped[list["SaleDetail"]] = relationship(back_populates="product", passive_deletes=True)

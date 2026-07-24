@@ -3,8 +3,9 @@ import type {
   DailySalesReport,
   InventoryReportItem,
   MonthlyRevenueReportItem,
+  PaginatedSalesReport,
   PaymentMethodReportItem,
-  SalesReportItem,
+  SaleResponse,
   TopProductReportItem,
 } from "../types/api";
 
@@ -13,8 +14,13 @@ export async function getDailySalesReport(): Promise<DailySalesReport> {
   return response.data;
 }
 
-export async function getSalesReport(): Promise<SalesReportItem[]> {
-  const response = await api.get<SalesReportItem[]>("/reports/sales");
+export async function getSalesReport(page = 1, pageSize = 20): Promise<PaginatedSalesReport> {
+  const response = await api.get<PaginatedSalesReport>("/reports/sales", { params: { page, page_size: pageSize } });
+  return response.data;
+}
+
+export async function getSaleDetail(id: number): Promise<SaleResponse> {
+  const response = await api.get<SaleResponse>(`/sales/${id}`);
   return response.data;
 }
 

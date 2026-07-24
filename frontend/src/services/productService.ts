@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Product } from "../types/api";
+import type { Product, ProductRemovalResponse } from "../types/api";
 
 export interface ProductFormPayload {
   name: string;
@@ -15,8 +15,8 @@ export interface ProductFormPayload {
   minimum_stock?: number;
 }
 
-export async function listProducts(search?: string, categoryId?: number, includeInactive = false): Promise<Product[]> {
-  const response = await api.get<Product[]>("/products", { params: { search, category_id: categoryId, include_inactive: includeInactive } });
+export async function listProducts(search?: string, categoryId?: number, includeInactive = false, statusFilter: "active" | "inactive" | "all" = "active"): Promise<Product[]> {
+  const response = await api.get<Product[]>("/products", { params: { search, category_id: categoryId, include_inactive: includeInactive, status_filter: statusFilter } });
   return response.data;
 }
 
@@ -35,8 +35,23 @@ export async function updateProduct(id: number, payload: Partial<ProductFormPayl
   return response.data;
 }
 
-export async function deactivateProduct(id: number): Promise<Product> {
-  const response = await api.delete<Product>(`/products/${id}`);
+export async function removeProduct(id: number, adminPassword: string): Promise<ProductRemovalResponse> {
+  const response = await api.post<ProductRemovalResponse>(`/products/${id}/remove`, { admin_password: adminPassword });
+  return response.data;
+}
+
+export async function deactivateProduct(id: number, adminPassword: string): Promise<Product> {
+  const response = await api.patch<Product>(`/products/${id}/deactivate`, { admin_password: adminPassword });
+  return response.data;
+}
+
+export async function permanentlyDeleteProduct(id: number, adminPassword: string): Promise<ProductRemovalResponse> {
+  const response = await api.delete<ProductRemovalResponse>(`/products/${id}/permanent`, { data: { admin_password: adminPassword } });
+  return response.data;
+}
+
+export async function reactivateProduct(id: number): Promise<Product> {
+  const response = await api.patch<Product>(`/products/${id}/reactivate`);
   return response.data;
 }
 

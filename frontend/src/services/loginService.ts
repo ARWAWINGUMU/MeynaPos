@@ -44,9 +44,11 @@ export async function loginRequest(credentials: LoginCredentials): Promise<AuthS
     return {
       token: response.data.access_token,
       user: {
+        id: response.data.user_id ?? 0,
         name: response.data.full_name ?? response.data.name ?? credentials.username,
         role: response.data.role ?? "CASHIER",
       },
+      mustChangePassword: Boolean(response.data.must_change_password),
     };
   } catch (error) {
     throw parseError(error);

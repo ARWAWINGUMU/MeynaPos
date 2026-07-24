@@ -3,6 +3,7 @@ from decimal import Decimal
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.business_setting import BusinessSetting
 from app.repositories.business_setting_repository import BusinessSettingRepository
 from app.schemas.setting import BusinessSettingsRead, BusinessSettingsUpdate
@@ -11,17 +12,6 @@ from app.services.file_storage_service import FileStorageService
 
 class SettingService:
     SUPPORTED_CURRENCIES = {"COP", "USD"}
-    DEFAULTS = {
-        "business_name": "MeynaPOS",
-        "tax_id": "0000000000",
-        "address": "N/A",
-        "phone": "N/A",
-        "email": "N/A",
-        "city": "N/A",
-        "currency": "COP",
-        "tax_percentage": Decimal("0.00"),
-        "logo_url": None,
-    }
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -37,7 +27,20 @@ class SettingService:
                 setting.currency = "COP"
                 return self.settings.save(setting)
             return setting
-        return self.settings.add(BusinessSetting(**self.DEFAULTS))
+        settings = get_settings()
+        return self.settings.add(
+            BusinessSetting(
+                business_name=settings.default_business_name,
+                tax_id=settings.default_business_nit,
+                address="N/A",
+                phone="N/A",
+                email="N/A",
+                city="N/A",
+                currency="COP",
+                tax_percentage=Decimal("0.00"),
+                logo_url=None,
+            )
+        )
 
     def update_settings(self, payload: BusinessSettingsUpdate) -> BusinessSettingsRead:
         setting = self.get_or_create_settings()

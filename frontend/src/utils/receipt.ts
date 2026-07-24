@@ -2,12 +2,18 @@ import { jsPDF } from "jspdf";
 
 import type { Customer } from "../services/customerService";
 import type { BusinessSettings } from "../services/settingService";
-import type { CartItem, PaymentMethod, SaleResponse } from "../types/api";
+import type { CartItem, PaymentMethod } from "../types/api";
 import { resolveMediaUrl } from "./media";
 import { formatMoney } from "./money";
 
+export interface ReceiptSale {
+  id: number;
+  invoice_number: string;
+  created_at: string;
+}
+
 export interface ReceiptData {
-  sale: SaleResponse;
+  sale: ReceiptSale;
   items: CartItem[];
   customer: Customer;
   cashierName: string;

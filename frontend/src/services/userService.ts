@@ -1,11 +1,11 @@
 import { api } from "./api";
 import type { Role } from "../types/auth";
-import type { UserPayload, UserRecord } from "../types/user";
+import type { AdminPasswordPayload, PasswordResetPayload, TemporaryPasswordResponse, UserPayload, UserRecord } from "../types/user";
 
 export interface UserFilters {
   search?: string;
   role?: Role | "";
-  status?: "active" | "inactive" | "locked" | "";
+  status?: "active" | "inactive" | "locked" | "password_pending" | "temporary_expired" | "";
 }
 
 export async function listUsers(filters: UserFilters): Promise<UserRecord[]> {
@@ -19,8 +19,8 @@ export async function listUsers(filters: UserFilters): Promise<UserRecord[]> {
   return response.data;
 }
 
-export async function createUser(payload: UserPayload): Promise<UserRecord> {
-  const response = await api.post<UserRecord>("/users", payload);
+export async function createUser(payload: UserPayload): Promise<TemporaryPasswordResponse> {
+  const response = await api.post<TemporaryPasswordResponse>("/users", payload);
   return response.data;
 }
 
@@ -29,14 +29,19 @@ export async function updateUser(id: number, payload: Omit<UserPayload, "passwor
   return response.data;
 }
 
-export async function activateUser(id: number): Promise<UserRecord> {
-  const response = await api.patch<UserRecord>(`/users/${id}/activate`);
+export async function activateUser(id: number, payload: AdminPasswordPayload): Promise<UserRecord> {
+  const response = await api.patch<UserRecord>(`/users/${id}/reactivate`, payload);
   return response.data;
 }
 
-export async function deactivateUser(id: number): Promise<UserRecord> {
-  const response = await api.patch<UserRecord>(`/users/${id}/deactivate`);
+export async function deactivateUser(id: number, payload: AdminPasswordPayload): Promise<UserRecord> {
+  const response = await api.patch<UserRecord>(`/users/${id}/deactivate`, payload);
   return response.data;
+}
+
+export async function deleteUser(id: number, payload: AdminPasswordPayload): Promise<string> {
+  const response = await api.delete<{ message: string }>(`/users/${id}`, { data: payload });
+  return response.data.message;
 }
 
 export async function unlockUser(id: number): Promise<UserRecord> {
@@ -49,7 +54,7 @@ export async function resetFailedAttempts(id: number): Promise<UserRecord> {
   return response.data;
 }
 
-export async function resetPassword(id: number, password: string): Promise<UserRecord> {
-  const response = await api.patch<UserRecord>(`/users/${id}/password`, { password });
+export async function resetPassword(id: number, payload: PasswordResetPayload): Promise<TemporaryPasswordResponse> {
+  const response = await api.patch<TemporaryPasswordResponse>(`/users/${id}/password`, payload);
   return response.data;
 }

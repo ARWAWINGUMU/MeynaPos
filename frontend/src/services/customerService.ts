@@ -19,7 +19,7 @@ export interface CustomerSummary extends Customer {
 }
 
 export interface CustomerSaleProduct {
-  product_id: number;
+  product_id: number | null;
   name: string;
   quantity: number;
   unit_price: string;

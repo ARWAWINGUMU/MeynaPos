@@ -18,6 +18,12 @@ def ensure_runtime_schema() -> None:
         "locked": "BOOLEAN NOT NULL DEFAULT FALSE",
         "locked_at": "TIMESTAMP WITH TIME ZONE",
         "last_login_at": "TIMESTAMP WITH TIME ZONE",
+        "is_superuser": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "must_change_password": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "temporary_password_expires_at": "TIMESTAMP WITH TIME ZONE",
+        "password_changed_at": "TIMESTAMP WITH TIME ZONE",
+        "password_reset_by_id": "INTEGER",
+        "token_version": "INTEGER NOT NULL DEFAULT 0",
     }
 
     for column_name, definition in column_definitions.items():
@@ -29,8 +35,33 @@ def ensure_runtime_schema() -> None:
             connection.execute(text(statement))
         connection.execute(text("UPDATE users SET failed_login_attempts = 0 WHERE failed_login_attempts IS NULL"))
         connection.execute(text("UPDATE users SET locked = FALSE WHERE locked IS NULL"))
+        connection.execute(text("UPDATE users SET is_superuser = FALSE WHERE is_superuser IS NULL"))
+        connection.execute(text("UPDATE users SET must_change_password = FALSE WHERE must_change_password IS NULL"))
+        connection.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
 
+    _ensure_columns(
+        "sale_details",
+        {
+            "product_name": "VARCHAR(160) NOT NULL DEFAULT 'Producto histórico'",
+            "product_sku": "VARCHAR(80)",
+            "product_barcode": "VARCHAR(80)",
+        },
+    )
+    existing_tables = set(inspect(database_manager.engine).get_table_names())
+    if {"sale_details", "products"}.issubset(existing_tables):
+        with database_manager.engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    UPDATE sale_details
+                    SET product_name = COALESCE((SELECT products.name FROM products WHERE products.id = sale_details.product_id), product_name),
+                        product_sku = (SELECT products.sku FROM products WHERE products.id = sale_details.product_id),
+                        product_barcode = (SELECT COALESCE(products.barcode, products.qr_code) FROM products WHERE products.id = sale_details.product_id)
+                    WHERE product_id IS NOT NULL
+                    """
+                )
+            )
     _ensure_columns(
         "products",
         {

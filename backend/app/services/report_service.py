@@ -6,7 +6,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from app.models.payment import Payment
-from app.models.product import Product
 from app.models.sale import Sale
 from app.models.sale_detail import SaleDetail
 from app.repositories.report_repository import ReportRepository
@@ -14,6 +13,7 @@ from app.schemas.report import (
     DailySalesReport,
     InventoryReportItem,
     MonthlyRevenueReportItem,
+    PaginatedSalesReport,
     PaymentMethodReportItem,
     SalesReportItem,
     TopProductReportItem,
@@ -36,28 +36,41 @@ class ReportService:
             total=total,
         )
 
-    def sales(self) -> list[SalesReportItem]:
+    def sales(self, page: int = 1, page_size: int = 20) -> PaginatedSalesReport:
+        page = max(1, page)
+        page_size = min(max(1, page_size), 50)
+        total = int(self.reports.db.scalar(select(func.count(Sale.id))) or 0)
+        total_pages = (total + page_size - 1) // page_size if total else 0
         statement = (
             select(Sale)
             .options(joinedload(Sale.cashier), joinedload(Sale.customer), joinedload(Sale.payment))
-            .order_by(Sale.created_at.desc())
+            .order_by(Sale.created_at.desc(), Sale.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         )
         sales = self.reports.db.scalars(statement).unique().all()
-        return [
-            SalesReportItem(
-                sale_number=sale.invoice_number,
-                date=sale.created_at.isoformat(),
-                cashier=sale.cashier.full_name if sale.cashier else "N/A",
-                customer=sale.customer.name if sale.customer else "N/A",
-                subtotal=sale.subtotal,
-                tax=sale.tax_amount if hasattr(sale, "tax_amount") else sale.tax,
-                discount=sale.discount_amount,
-                total=sale.total,
-                payment_method=sale.payment.method.value if sale.payment else "N/A",
-                status="PAGADA",
-            )
-            for sale in sales
-        ]
+        return PaginatedSalesReport(
+            items=[
+                SalesReportItem(
+                    sale_id=sale.id,
+                    sale_number=sale.invoice_number,
+                    date=sale.created_at.isoformat(),
+                    cashier=sale.cashier.full_name if sale.cashier else "N/A",
+                    customer=sale.customer.name if sale.customer else "N/A",
+                    subtotal=sale.subtotal,
+                    tax=sale.tax_amount if hasattr(sale, "tax_amount") else sale.tax,
+                    discount=sale.discount_amount,
+                    total=sale.total,
+                    payment_method=sale.payment.method.value if sale.payment else "N/A",
+                    status="PAGADA",
+                )
+                for sale in sales
+            ],
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+        )
 
     def inventory(self) -> list[InventoryReportItem]:
         items: list[InventoryReportItem] = []
@@ -80,10 +93,9 @@ class ReportService:
 
     def top_products(self) -> list[TopProductReportItem]:
         statement = (
-            select(Product.id, Product.name, func.coalesce(func.sum(SaleDetail.quantity), 0), func.coalesce(func.sum(SaleDetail.line_total), 0))
-            .join(SaleDetail, SaleDetail.product_id == Product.id)
+            select(SaleDetail.product_id, SaleDetail.product_name, func.coalesce(func.sum(SaleDetail.quantity), 0), func.coalesce(func.sum(SaleDetail.line_total), 0))
             .join(Sale, Sale.id == SaleDetail.sale_id)
-            .group_by(Product.id, Product.name)
+            .group_by(SaleDetail.product_id, SaleDetail.product_name)
             .order_by(func.sum(SaleDetail.quantity).desc())
             .limit(10)
         )

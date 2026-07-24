@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -12,8 +12,8 @@ from app.schemas.report import (
     DailySalesReport,
     InventoryReportItem,
     MonthlyRevenueReportItem,
+    PaginatedSalesReport,
     PaymentMethodReportItem,
-    SalesReportItem,
     TopProductReportItem,
 )
 from app.services.report_service import ReportService
@@ -31,12 +31,14 @@ def daily_sales_report(
     return ReportService(ReportRepository(db)).daily_sales(target_date)
 
 
-@router.get("/sales", response_model=list[SalesReportItem])
+@router.get("/sales", response_model=PaginatedSalesReport)
 def sales_detail_report(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(RoleName.ADMIN)),
-) -> list[SalesReportItem]:
-    return ReportService(ReportRepository(db)).sales()
+) -> PaginatedSalesReport:
+    return ReportService(ReportRepository(db)).sales(page, page_size)
 
 
 @router.get("/inventory", response_model=list[InventoryReportItem])

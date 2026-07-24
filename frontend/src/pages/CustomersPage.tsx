@@ -16,9 +16,9 @@ import {
   type CustomerSaleHistoryItem,
   type CustomerSummary,
 } from "../services/customerService";
-import type { CartItem, PaymentMethod, Product, SaleResponse } from "../types/api";
+import type { CartItem, PaymentMethod } from "../types/api";
 import { formatMoney } from "../utils/money";
-import { downloadReceiptPdf, printReceiptPdf, type ReceiptData } from "../utils/receipt";
+import { downloadReceiptPdf, printReceiptPdf, type ReceiptData, type ReceiptSale } from "../utils/receipt";
 
 const emptyCustomer: CustomerPayload = { name: "", phone: "", address: "", email: "", document_number: "" };
 const pageSize = 8;
@@ -123,32 +123,22 @@ export function CustomersPage() {
     const items: CartItem[] = sale.products.map((item) => ({
       quantity: item.quantity,
       product: {
-        id: item.product_id,
+        id: item.product_id ?? 0,
         name: item.name,
         sku: String(item.product_id),
         price: item.unit_price,
         cost: "0.00",
         is_active: true,
-      } as Product,
+      },
     }));
     const method = sale.payment_method ?? "CASH";
-    const saleResponse: SaleResponse = {
+    const receiptSale: ReceiptSale = {
       id: sale.id,
       invoice_number: sale.sale_number,
-      customer_id: selectedCustomer.id,
-      subtotal: sale.subtotal,
-      tax_percentage: settings.tax_percentage,
-      tax_amount: sale.tax,
-      tax: sale.tax,
-      tipo_descuento: "NONE",
-      valor_descuento: "0.00",
-      monto_descuento: sale.discount,
-      total: sale.total,
       created_at: sale.date,
-      payment: { method, amount: sale.total },
     };
     return {
-      sale: saleResponse,
+      sale: receiptSale,
       items,
       customer: selectedCustomer,
       cashierName: sale.cashier || fullName || "Cajero",

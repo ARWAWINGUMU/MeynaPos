@@ -44,7 +44,10 @@ class SaleCreate(BaseModel):
 
 
 class SaleDetailRead(BaseModel):
-    product_id: int
+    product_id: int | None
+    product_name: str
+    product_sku: str | None
+    product_barcode: str | None
     quantity: int
     unit_price: Decimal
     line_total: Decimal

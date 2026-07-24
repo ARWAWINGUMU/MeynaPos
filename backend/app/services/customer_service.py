@@ -102,7 +102,7 @@ class CustomerService:
                 products=[
                     CustomerSaleProduct(
                         product_id=detail.product_id,
-                        name=detail.product.name if detail.product else f"Product {detail.product_id}",
+                        name=detail.product_name or (detail.product.name if detail.product else f"Product {detail.product_id or 'deleted'}"),
                         quantity=detail.quantity,
                         unit_price=detail.unit_price,
                         line_total=detail.line_total,

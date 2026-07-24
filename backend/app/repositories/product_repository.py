@@ -1,16 +1,26 @@
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.product import Product
+from app.models.purchase_detail import PurchaseDetail
+from app.models.sale_detail import SaleDetail
 
 
 class ProductRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def list(self, search: str | None = None, category_id: int | None = None, include_inactive: bool = False) -> list[Product]:
+    def list(self, search: str | None = None, category_id: int | None = None, include_inactive: bool = False, status_filter: str | None = None) -> list[Product]:
         statement = select(Product).options(joinedload(Product.inventory)).order_by(Product.name)
-        if not include_inactive:
+        if status_filter == "active":
+            statement = statement.where(Product.is_active.is_(True))
+        elif status_filter == "inactive":
+            statement = statement.where(Product.is_active.is_(False))
+        elif status_filter == "all":
+            pass
+        elif include_inactive:
+            pass
+        else:
             statement = statement.where(Product.is_active.is_(True))
         if search:
             term = f"%{search}%"
@@ -52,3 +62,15 @@ class ProductRepository:
     def delete(self, product: Product) -> None:
         self.db.delete(product)
         self.db.commit()
+
+    def delete_without_commit(self, product: Product) -> None:
+        self.db.delete(product)
+
+    def sale_detail_count(self, product_id: int) -> int:
+        return int(self.db.scalar(select(func.count(SaleDetail.id)).where(SaleDetail.product_id == product_id)) or 0)
+
+    def purchase_detail_count(self, product_id: int) -> int:
+        return int(self.db.scalar(select(func.count(PurchaseDetail.id)).where(PurchaseDetail.product_id == product_id)) or 0)
+
+    def has_history(self, product_id: int) -> bool:
+        return bool(self.sale_detail_count(product_id) or self.purchase_detail_count(product_id))

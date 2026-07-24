@@ -39,6 +39,9 @@ class SaleService:
             details.append(
                 SaleDetail(
                     product_id=product.id,
+                    product_name=product.name,
+                    product_sku=product.sku,
+                    product_barcode=product.barcode or product.qr_code,
                     quantity=item.quantity,
                     unit_price=product.price,
                     line_total=line_total,
@@ -82,6 +85,12 @@ class SaleService:
 
     def list_sales(self) -> list[Sale]:
         return self.sales.list()
+
+    def get_sale(self, sale_id: int) -> Sale:
+        sale = self.sales.get(sale_id)
+        if sale is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sale not found")
+        return sale
 
     @staticmethod
     def _next_invoice_number() -> str:

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 interface ReusableModalProps {
@@ -9,6 +9,19 @@ interface ReusableModalProps {
 }
 
 export function ReusableModal({ open, title, children, onClose }: ReusableModalProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open]);
+
   if (!open) {
     return null;
   }
@@ -27,4 +40,3 @@ export function ReusableModal({ open, title, children, onClose }: ReusableModalP
     </div>
   );
 }
-

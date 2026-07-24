@@ -13,6 +13,7 @@ class DailySalesReport(BaseModel):
 
 
 class SalesReportItem(BaseModel):
+    sale_id: int
     sale_number: str
     date: str
     cashier: str
@@ -23,6 +24,14 @@ class SalesReportItem(BaseModel):
     total: Decimal
     payment_method: str
     status: str
+
+
+class PaginatedSalesReport(BaseModel):
+    items: list[SalesReportItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class InventoryReportItem(BaseModel):
@@ -38,7 +47,7 @@ class InventoryReportItem(BaseModel):
 
 
 class TopProductReportItem(BaseModel):
-    product_id: int
+    product_id: int | None
     name: str
     quantity_sold: int
     total: Decimal

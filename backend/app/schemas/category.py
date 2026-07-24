@@ -15,5 +15,6 @@ class CategoryUpdate(BaseModel):
 class CategoryRead(CategoryCreate):
     id: int
     is_active: bool
+    product_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)

@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.security import hash_password
 from app.models.category import Category
 from app.models.business_setting import BusinessSetting
@@ -12,6 +13,7 @@ from app.models.user import User
 
 
 def seed_initial_data(db: Session) -> None:
+    settings = get_settings()
     for role_name in RoleName:
         existing_role = db.scalars(select(Role).where(Role.name == role_name)).first()
         if existing_role is None:
@@ -23,8 +25,8 @@ def seed_initial_data(db: Session) -> None:
     if db.scalars(select(BusinessSetting)).first() is None:
         db.add(
             BusinessSetting(
-                business_name="MeynaPOS",
-                tax_id="0000000000",
+                business_name=settings.default_business_name,
+                tax_id=settings.default_business_nit,
                 address="N/A",
                 phone="N/A",
                 email="N/A",
@@ -56,33 +58,40 @@ def seed_initial_data(db: Session) -> None:
     for sale in db.scalars(select(Sale).where(Sale.customer_id.is_(None))).all():
         sale.customer_id = default_customer.id
 
-    admin = db.scalars(select(User).where(User.email == "admin@meynapos.com")).first()
     admin_role = db.scalars(select(Role).where(Role.name == RoleName.ADMIN)).first()
-    admin_password_hash = hash_password("Admin123!")
-    if admin is None and admin_role is not None:
+    existing_admin = (
+        db.scalars(select(User).join(User.role).where(Role.name == RoleName.ADMIN)).first()
+        if admin_role is not None
+        else None
+    )
+    if existing_admin is None and admin_role is not None:
+        if not settings.initial_admin_email or not settings.initial_admin_password:
+            raise RuntimeError("INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are required to create the first administrator.")
+        if settings.environment.lower() == "production" and settings.initial_admin_password == "change-me":
+            raise RuntimeError("INITIAL_ADMIN_PASSWORD must be changed before production deployment.")
+        name_parts = settings.initial_admin_name.strip().split(maxsplit=1)
+        first_name = name_parts[0] if name_parts else "Administrador"
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
         db.add(
             User(
-                full_name="MeynaPOS Administrator",
-                first_name="MeynaPOS",
-                last_name="Administrator",
-                email="admin@meynapos.com",
-                username="admin",
-                hashed_password=admin_password_hash,
+                full_name=settings.initial_admin_name,
+                first_name=first_name,
+                last_name=last_name,
+                email=settings.initial_admin_email,
+                username=settings.initial_admin_email.split("@")[0],
+                hashed_password=hash_password(settings.initial_admin_password),
+                is_active=True,
+                is_superuser=True,
+                must_change_password=True,
+                password_changed_at=None,
+                temporary_password_expires_at=None,
+                token_version=0,
                 role_id=admin_role.id,
             )
         )
-    elif admin is not None:
-        admin.full_name = "MeynaPOS Administrator"
-        admin.first_name = admin.first_name or "MeynaPOS"
-        admin.last_name = admin.last_name or "Administrator"
-        admin.username = admin.username or "admin"
-        admin.hashed_password = admin_password_hash
-        admin.is_active = True
-        if admin_role is not None:
-            admin.role_id = admin_role.id
 
     defaults = {
-        "business_name": "MeynaPOS",
+        "business_name": settings.default_business_name,
         "currency": "COP",
         "default_minimum_stock": "5",
         "system_notes": "Tecnología para crecer juntos",

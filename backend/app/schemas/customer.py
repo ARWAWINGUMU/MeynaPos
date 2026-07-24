@@ -34,7 +34,7 @@ class CustomerSummary(CustomerRead):
 
 
 class CustomerSaleProduct(BaseModel):
-    product_id: int
+    product_id: int | None
     name: str
     quantity: int
     unit_price: Decimal

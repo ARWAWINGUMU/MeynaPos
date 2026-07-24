@@ -1,6 +1,6 @@
 """Add sale discounts and COP currency default.
 
-Revision ID: 0002_sales_discounts_and_currency
+Revision ID: 0002_sales_disc
 Revises: 0001_initial_schema
 Create Date: 2026-07-14
 """
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0002_sales_discounts_and_currency"
+revision = "0002_sales_disc"
 down_revision = "0001_initial_schema"
 branch_labels = None
 depends_on = None

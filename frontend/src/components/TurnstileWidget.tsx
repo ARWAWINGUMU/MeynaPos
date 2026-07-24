@@ -27,7 +27,7 @@ export function TurnstileWidget({ onVerify }: TurnstileWidgetProps) {
     if (!document.getElementById(scriptId)) {
       const script = document.createElement("script");
       script.id = scriptId;
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       script.async = true;
       script.defer = true;
       document.body.appendChild(script);
@@ -56,6 +56,9 @@ export function TurnstileWidget({ onVerify }: TurnstileWidgetProps) {
     return null;
   }
 
-  return <div ref={containerRef} className="min-h-[65px]" />;
+  return (
+    <div className="relative z-20 flex min-h-[78px] w-full items-center justify-center overflow-visible py-1 pointer-events-auto">
+      <div ref={containerRef} className="min-h-[65px] w-[300px] max-w-full overflow-visible" />
+    </div>
+  );
 }
-

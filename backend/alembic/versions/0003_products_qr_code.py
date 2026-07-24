@@ -1,7 +1,7 @@
 """Add product QR code support.
 
 Revision ID: 0003_products_qr_code
-Revises: 0002_sales_discounts_and_currency
+Revises: 0002_sales_disc
 Create Date: 2026-07-14
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0003_products_qr_code"
-down_revision = "0002_sales_discounts_and_currency"
+down_revision = "0002_sales_disc"
 branch_labels = None
 depends_on = None
 

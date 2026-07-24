@@ -1,12 +1,18 @@
 from datetime import datetime, timezone
+import logging
 
 import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, hash_password, verify_password
+from app.models.user import User
 from app.repositories.user_repository import UserRepository
-from app.schemas.auth import TokenResponse
+from app.schemas.auth import ChangePasswordRequest, ChangeRequiredPasswordRequest, MessageResponse, TokenResponse
+from app.utils.passwords import validate_password_policy
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -40,13 +46,77 @@ class AuthService:
                 detail={"message": "Contraseña incorrecta.", "attempts_remaining": attempts_remaining},
             )
 
+        now = datetime.now(timezone.utc)
+        if user.must_change_password and self._temporary_password_expired(user, now):
+            logger.info("TEMPORARY_PASSWORD_EXPIRED user_id=%s", user.id)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"message": "La contraseña temporal expiró. Solicite un nuevo restablecimiento al administrador.", "temporary_password_expired": True},
+            )
+
         user.failed_login_attempts = 0
         user.locked = False
         user.locked_at = None
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = now
         self.users.db.commit()
-        token = create_access_token(subject=user.email, role=user.role.name.value)
-        return TokenResponse(access_token=token, role=user.role.name.value, full_name=user.full_name)
+        token = create_access_token(
+            subject=user.email,
+            role=user.role.name.value,
+            token_version=user.token_version,
+            password_change_required=user.must_change_password,
+        )
+        return TokenResponse(
+            access_token=token,
+            role=user.role.name.value,
+            full_name=user.full_name,
+            user_id=user.id,
+            must_change_password=user.must_change_password,
+        )
+
+    def change_required_password(self, user: User, payload: ChangeRequiredPasswordRequest) -> MessageResponse:
+        if not user.must_change_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "No hay cambio de contraseña pendiente."})
+        if not verify_password(payload.current_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "No fue posible actualizar la contraseña."})
+        if payload.new_password != payload.confirm_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "Las contraseñas no coinciden."})
+        if verify_password(payload.new_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "La nueva contraseña no puede ser igual a la temporal."})
+        errors = validate_password_policy(payload.new_password)
+        if errors:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": " ".join(errors)})
+
+        user.hashed_password = hash_password(payload.new_password)
+        user.must_change_password = False
+        user.temporary_password_expires_at = None
+        user.password_changed_at = datetime.now(timezone.utc)
+        user.token_version += 1
+        user.failed_login_attempts = 0
+        user.locked = False
+        user.locked_at = None
+        self.users.db.commit()
+        logger.info("USER_COMPLETED_REQUIRED_PASSWORD_CHANGE user_id=%s", user.id)
+        return MessageResponse(message="Contraseña actualizada correctamente. Inicie sesión nuevamente.")
+
+    def change_password(self, user: User, payload: ChangePasswordRequest) -> MessageResponse:
+        if user.must_change_password:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"message": "Debe completar el cambio obligatorio de contraseña."})
+        if not verify_password(payload.current_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "No fue posible actualizar la contraseña."})
+        if payload.new_password != payload.confirm_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "Las contraseñas no coinciden."})
+        if verify_password(payload.new_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "La nueva contraseña debe ser diferente."})
+        errors = validate_password_policy(payload.new_password)
+        if errors:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": " ".join(errors)})
+
+        user.hashed_password = hash_password(payload.new_password)
+        user.password_changed_at = datetime.now(timezone.utc)
+        user.token_version += 1
+        self.users.db.commit()
+        logger.info("USER_CHANGED_PASSWORD user_id=%s", user.id)
+        return MessageResponse(message="Contraseña actualizada correctamente. Inicie sesión nuevamente.")
 
     @staticmethod
     def _locked_detail() -> dict[str, object]:
@@ -55,6 +125,15 @@ class AuthService:
             "locked": True,
             "attempts_remaining": 0,
         }
+
+    @staticmethod
+    def _temporary_password_expired(user: User, now: datetime) -> bool:
+        if user.temporary_password_expires_at is None:
+            return False
+        expires_at = user.temporary_password_expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at <= now
 
     @staticmethod
     def _validate_captcha(token: str | None) -> None:

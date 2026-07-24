@@ -8,6 +8,7 @@ import { POSPage } from "../pages/POSPage";
 import { ProductsPage } from "../pages/ProductsPage";
 import { PurchasesPage } from "../pages/PurchasesPage";
 import { CustomersPage } from "../pages/CustomersPage";
+import { ChangeRequiredPasswordPage } from "../pages/ChangeRequiredPasswordPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { UsersPage } from "../pages/UsersPage";
@@ -19,6 +20,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<PrivateRoute />}>
+        <Route path="/change-password" element={<ChangeRequiredPasswordPage />} />
         <Route element={<MainLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="ventas" element={<POSPage />} />

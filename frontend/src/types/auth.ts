@@ -12,9 +12,12 @@ export interface LoginApiResponse {
   role?: Role;
   full_name?: string;
   name?: string;
+  user_id?: number;
+  must_change_password?: boolean;
 }
 
 export interface AuthUser {
+  id: number;
   name: string;
   role: Role;
 }
@@ -22,6 +25,7 @@ export interface AuthUser {
 export interface AuthSession {
   token: string;
   user: AuthUser;
+  mustChangePassword: boolean;
 }
 
 export interface AuthErrorResponse {
@@ -33,4 +37,11 @@ export interface LoginErrorDetail {
   message?: string;
   attempts_remaining?: number;
   locked?: boolean;
+  temporary_password_expired?: boolean;
+}
+
+export interface ChangeRequiredPasswordPayload {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
 }
