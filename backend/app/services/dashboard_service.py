@@ -29,7 +29,7 @@ class DashboardService:
             self.db.scalar(
                 select(func.count(Product.id))
                 .join(Inventory, Inventory.product_id == Product.id)
-                .where(Product.is_active.is_(True), Inventory.quantity > 0)
+                .where(Product.is_active.is_(True), Product.article_type == "PRODUCT", Inventory.quantity > 0)
             )
             or 0
         )
@@ -37,7 +37,7 @@ class DashboardService:
             self.db.scalar(
                 select(func.count(Product.id))
                 .join(Inventory, Inventory.product_id == Product.id)
-                .where(Product.is_active.is_(True), Inventory.quantity <= Inventory.minimum_stock)
+                .where(Product.is_active.is_(True), Product.article_type == "PRODUCT", Inventory.quantity <= Inventory.minimum_stock)
             )
             or 0
         )

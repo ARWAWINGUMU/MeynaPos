@@ -15,6 +15,7 @@ import type { LucideIcon } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import logoImg from "../assets/logo.png";
+import { InventoryNotificationBell } from "../components/InventoryNotificationBell";
 import { useAuth } from "../context/AuthContext";
 import { useBusinessSettings } from "../hooks/useBusinessSettings";
 
@@ -112,6 +113,8 @@ export function MainLayout() {
         </div>
 
         <div className="ml-6 flex items-center gap-4">
+          {role === "ADMIN" && <InventoryNotificationBell />}
+
           <p className="hidden text-sm capitalize text-gray-500 xl:block">{getCurrentDate()}</p>
 
           <div className="flex items-center gap-3 border-l border-gray-200 pl-4">

@@ -2,6 +2,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.product import Product
+from app.models.inventory import Inventory
 from app.models.purchase_detail import PurchaseDetail
 from app.models.sale_detail import SaleDetail
 
@@ -46,6 +47,14 @@ class ProductRepository:
             Product.is_active.is_(True),
         )
         return self.db.scalars(statement).first()
+
+    def get_for_update(self, product_id: int) -> Product | None:
+        product = self.db.scalars(select(Product).where(Product.id == product_id)
+            .with_for_update().execution_options(populate_existing=True)).first()
+        if product is not None:
+            product.inventory = self.db.scalars(select(Inventory).where(Inventory.product_id == product_id)
+                .with_for_update().execution_options(populate_existing=True)).first()
+        return product
 
     def get_by_unique_code(self, code: str, exclude_product_id: int | None = None) -> Product | None:
         statement = select(Product).where(or_(Product.barcode == code, Product.qr_code == code, Product.sku == code))

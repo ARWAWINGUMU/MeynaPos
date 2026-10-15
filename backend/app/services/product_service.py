@@ -5,12 +5,14 @@ from sqlalchemy import update
 
 from app.repositories.product_repository import ProductRepository
 from app.models.category import Category
+from app.models.inventory import Inventory
 from app.models.role import RoleName
 from app.models.sale_detail import SaleDetail
 from app.models.user import User
 from app.core.security import verify_password
 from app.schemas.product import ProductCreate, ProductRemovalResponse, ProductUpdate
 from app.services.file_storage_service import FileStorageService
+from app.services.inventory_alert_service import InventoryAlertService
 from app.utils.product_factory import ProductFactory
 
 
@@ -29,14 +31,24 @@ class ProductService:
         self._ensure_unique_codes(sku=payload.sku, barcode=payload.barcode, qr_code=payload.qr_code)
         self._ensure_active_category(payload.category_id)
         product = ProductFactory.create_product(payload)
-        return self.products.add(product)
+        product = self.products.add(product)
+        InventoryAlertService(self.products.db).sync_product(product)
+        self.products.db.refresh(product)
+        return product
 
     def update_product(self, product_id: int, payload: ProductUpdate):
-        product = self.products.get(product_id)
+        product = self.products.get_for_update(product_id)
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         self._normalize_codes(payload)
         next_values = payload.model_dump(exclude_unset=True)
+        article_type = next_values.get("article_type", product.article_type)
+        if article_type is None:
+            raise HTTPException(422, "Article type cannot be null")
+        if article_type == "SERVICE" and any(next_values.get(field) is not None for field in ("quantity", "minimum_stock")):
+            raise HTTPException(422, "Services do not accept inventory adjustments")
+        if article_type == "PRODUCT" and product.inventory is None:
+            product.inventory = Inventory(quantity=0, minimum_stock=5)
         self._ensure_unique_codes(
             sku=next_values.get("sku"),
             barcode=next_values.get("barcode"),
@@ -51,6 +63,7 @@ class ProductService:
                 product.inventory.minimum_stock = value
             elif hasattr(product, field):
                 setattr(product, field, value)
+        InventoryAlertService(self.products.db).sync_product(product, commit=False)
         self.products.db.commit()
         self.products.db.refresh(product)
         return product
@@ -62,6 +75,7 @@ class ProductService:
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         product.is_active = False
+        InventoryAlertService(self.products.db).sync_product(product, commit=False)
         self.products.db.commit()
         self.products.db.refresh(product)
         if admin is not None:
@@ -113,6 +127,7 @@ class ProductService:
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         product.is_active = True
+        InventoryAlertService(self.products.db).sync_product(product, commit=False)
         self.products.db.commit()
         self.products.db.refresh(product)
         logger.info("PRODUCT_REACTIVATED product_id=%s", product_id)

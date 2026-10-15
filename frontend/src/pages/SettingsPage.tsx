@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Building2, Save, Upload } from "lucide-react";
 
 import logoImg from "../assets/logo.png";
+import { PrintSettingsPanel } from "../components/PrintSettingsPanel";
 import { getSettings, updateSettings, uploadBusinessLogo, type BusinessSettings } from "../services/settingService";
 import { resolveMediaUrl } from "../utils/media";
 import { SUPPORTED_CURRENCIES, type CurrencyCode } from "../utils/money";
@@ -140,6 +141,7 @@ export function SettingsPage() {
           </label>
         </div>
       </div>
+      <PrintSettingsPanel settings={settings} onSettingsSaved={setSettings} />
     </section>
   );
 }

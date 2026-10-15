@@ -2,6 +2,8 @@ from app.models.category import Category
 from app.models.business_setting import BusinessSetting
 from app.models.customer import Customer
 from app.models.inventory import Inventory
+from app.models.inventory_alert import InventoryAlert, InventoryAlertStatus
+from app.models.open_sale import OpenSale, OpenSaleLine, OpenSaleStatus
 from app.models.payment import Payment, PaymentMethod
 from app.models.product import Product
 from app.models.purchase import Purchase
@@ -19,6 +21,11 @@ __all__ = [
     "BusinessSetting",
     "Customer",
     "Inventory",
+    "InventoryAlert",
+    "InventoryAlertStatus",
+    "OpenSale",
+    "OpenSaleLine",
+    "OpenSaleStatus",
     "Payment",
     "PaymentMethod",
     "Product",

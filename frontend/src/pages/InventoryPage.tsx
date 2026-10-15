@@ -1,49 +1,61 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Package, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 import { BarcodeScannerInput } from "../components/BarcodeScannerInput";
 import { useAuth } from "../context/AuthContext";
 import { listCategories } from "../services/categoryService";
 import { findProductByBarcode, listProducts, updateProduct } from "../services/productService";
 import type { Category, Product } from "../types/api";
+import { filterInventoryProducts, tracksInventory } from "../utils/catalog";
+import { useToast } from "../context/ToastContext";
 
 export function InventoryPage() {
   const { role } = useAuth();
+  const { showToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<number | "">("");
+  const [loaded, setLoaded] = useState(false);
+  const focusedProductId = Number(searchParams.get("productId")) || null;
 
   async function loadInventory() {
-    setProducts(await listProducts());
+    setProducts((await listProducts()).filter(tracksInventory));
+    setLoaded(true);
   }
 
   useEffect(() => {
-    loadInventory();
+    void loadInventory().catch(() => showToast("No fue posible cargar el inventario.", "error"));
     listCategories().then(setCategories).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (focusedProductId) {
+      setSearch("");
+      setCategoryFilter("");
+      setLowOnly(false);
+    }
+  }, [focusedProductId]);
+
   const filtered = useMemo(
-    () =>
-      products.filter((product) => {
-        const matchesSearch = product.name.toLowerCase().includes(search.toLowerCase()) || product.barcode?.includes(search) || product.qr_code?.includes(search);
-        const matchesLow = !lowOnly || product.inventory?.low_stock;
-        const matchesCategory = categoryFilter === "" || product.category_id === categoryFilter;
-        return matchesSearch && matchesLow && matchesCategory;
-      }),
-    [categoryFilter, lowOnly, products, search],
+    () => filterInventoryProducts(products, search, categoryFilter, lowOnly, focusedProductId),
+    [categoryFilter, focusedProductId, lowOnly, products, search],
   );
 
   async function updateStock(product: Product, quantity: number) {
-    await updateProduct(product.id, { quantity });
-    await loadInventory();
+    try {
+      await updateProduct(product.id, { quantity });
+      await loadInventory();
+    } catch { showToast("No fue posible actualizar las existencias.", "error"); }
   }
 
   async function handleInventoryScan(code: string) {
     try {
       const product = await findProductByBarcode(code);
-      setSearch(product.barcode ?? product.qr_code ?? code);
+      setSearch(product.sku);
     } catch {
       setSearch(code);
     }
@@ -57,6 +69,7 @@ export function InventoryPage() {
       </div>
 
       <div className="flex flex-wrap gap-3">
+        {focusedProductId && <button type="button" onClick={() => setSearchParams({})} className="rounded-lg border border-emerald-200 px-3 py-2 text-sm text-emerald-700">Ver todo el inventario</button>}
         <div className="relative min-w-80">
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar producto o código" className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-4" />
@@ -71,6 +84,9 @@ export function InventoryPage() {
         </button>
       </div>
 
+      {loaded && focusedProductId && !products.some((product) => product.id === focusedProductId) && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">El producto de esta notificacion ya no existe o no esta activo.</p>
+      )}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
         {filtered.map((product) => {
           const quantity = product.inventory?.quantity ?? 0;
@@ -78,7 +94,7 @@ export function InventoryPage() {
           const status = quantity === 0 ? "Agotado" : quantity <= minimum ? "Bajo Stock" : "Disponible";
           const statusClass = quantity === 0 ? "bg-red-50 text-red-700" : quantity <= minimum ? "bg-yellow-50 text-yellow-700" : "bg-green-50 text-green-700";
           return (
-            <article key={product.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <article key={product.id} className={`rounded-xl border bg-white p-5 shadow-sm ${product.id === focusedProductId ? "border-emerald-600 ring-2 ring-emerald-100" : "border-gray-200"}`}>
               <div className="mb-4 flex items-center justify-between">
                 <Package className="h-8 w-8 text-[#1B8A5A]" />
                 <span className={`rounded-full px-3 py-1 text-xs ${statusClass}`}>{status}</span>

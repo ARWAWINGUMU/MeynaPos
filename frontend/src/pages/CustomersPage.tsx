@@ -18,7 +18,8 @@ import {
 } from "../services/customerService";
 import type { CartItem, PaymentMethod } from "../types/api";
 import { formatMoney } from "../utils/money";
-import { downloadReceiptPdf, printReceiptPdf, type ReceiptData, type ReceiptSale } from "../utils/receipt";
+import type { ReceiptData, ReceiptSale } from "../utils/receipt";
+import { useReceiptPrinter } from "../hooks/useReceiptPrinter";
 
 const emptyCustomer: CustomerPayload = { name: "", phone: "", address: "", email: "", document_number: "" };
 const pageSize = 8;
@@ -36,6 +37,7 @@ function paymentLabel(method?: PaymentMethod | null): string {
 }
 
 export function CustomersPage() {
+  const receiptPrinter = useReceiptPrinter();
   const { fullName } = useAuth();
   const { settings, currency } = useBusinessSettings();
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
@@ -143,8 +145,6 @@ export function CustomersPage() {
       customer: selectedCustomer,
       cashierName: sale.cashier || fullName || "Cajero",
       paymentMethod: method,
-      receivedAmount: Number(sale.total),
-      changeAmount: 0,
       subtotal: Number(sale.subtotal),
       tax: Number(sale.tax),
       discount: Number(sale.discount),
@@ -156,12 +156,12 @@ export function CustomersPage() {
 
   async function downloadSale(sale: CustomerSaleHistoryItem) {
     const receipt = receiptFromSale(sale);
-    if (receipt) await downloadReceiptPdf(receipt);
+    if (receipt) await receiptPrinter.run(receipt, "download");
   }
 
   async function printSale(sale: CustomerSaleHistoryItem) {
     const receipt = receiptFromSale(sale);
-    if (receipt) await printReceiptPdf(receipt);
+    if (receipt) await receiptPrinter.run(receipt, "print");
   }
 
   const columns: Array<TableColumn<CustomerSummary>> = [
@@ -247,6 +247,7 @@ export function CustomersPage() {
       </ReusableModal>
 
       <ReusableModal open={detailOpen} title={selectedCustomer ? `Historial de ${selectedCustomer.name}` : "Historial"} onClose={() => setDetailOpen(false)}>
+        {receiptPrinter.error && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{receiptPrinter.error}</p>}
         <div className="space-y-4">
           {selectedCustomer && (
             <div className="grid gap-3 rounded-lg bg-gray-50 p-4 text-sm md:grid-cols-3">

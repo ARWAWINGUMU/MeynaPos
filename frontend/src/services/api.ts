@@ -14,7 +14,15 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = response.config.method?.toLowerCase();
+    if (method && ["post", "put", "patch", "delete"].includes(method)
+      && (/^\/?(sales|products|inventory|purchases)(\/|$)/.test(response.config.url ?? "")
+        || /^\/?open-sales\/[^/]+\/complete$/.test(response.config.url ?? ""))) {
+      window.dispatchEvent(new Event("meynapos:inventory-changed"));
+    }
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       clearSession();

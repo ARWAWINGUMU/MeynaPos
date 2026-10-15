@@ -124,7 +124,7 @@ class CustomerService:
         if customer is not None:
             return customer
         customer = Customer(
-            name="Cliente Predeterminado",
+            name="Cliente final",
             document_number=self.DEFAULT_DOCUMENT_NUMBER,
             phone="N/A",
             email="N/A",

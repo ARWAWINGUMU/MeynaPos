@@ -1,5 +1,6 @@
 import { api } from "./api";
 import type { CurrencyCode } from "../utils/money";
+import type { PrintPreferences } from "../utils/printPreferences";
 
 export interface BusinessSettings {
   id: number;
@@ -12,6 +13,7 @@ export interface BusinessSettings {
   currency: CurrencyCode;
   tax_percentage: string;
   logo_url?: string | null;
+  print_preferences?: PrintPreferences;
   updated_at: string;
 }
 

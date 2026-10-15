@@ -14,9 +14,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 
 import logoImg from "../assets/logo.png";
 import { BarcodeScannerInput } from "../components/BarcodeScannerInput";
+import { OpenSalesBar } from "../components/OpenSalesBar";
+import { tracksInventory } from "../utils/catalog";
 import { ReusableModal } from "../components/ReusableModal";
 import { useAuth } from "../context/AuthContext";
 import { createCategory, listCategories } from "../services/categoryService";
@@ -30,12 +33,14 @@ import {
   type CustomerPayload,
 } from "../services/customerService";
 import { createProduct, findProductByBarcode, listProducts, type ProductFormPayload } from "../services/productService";
-import { createSale } from "../services/saleService";
+import { useOpenSales } from "../hooks/useOpenSales";
+import { openSaleError } from "../services/openSaleService";
 import { getSettings, type BusinessSettings } from "../services/settingService";
-import type { CartItem, Category, DiscountType, PaymentMethod, Product } from "../types/api";
+import type { Category, DiscountType, PaymentMethod, Product } from "../types/api";
 import { resolveMediaUrl } from "../utils/media";
-import { formatMoney, formatMoneyInput, parseMoneyInput } from "../utils/money";
-import { downloadReceiptPdf, printReceiptPdf, type ReceiptData } from "../utils/receipt";
+import { formatMoney, formatMoneyInput, normalizeCurrency, parseMoneyInput } from "../utils/money";
+import type { ReceiptData } from "../utils/receipt";
+import { useReceiptPrinter } from "../hooks/useReceiptPrinter";
 
 interface PaymentDraft {
   method: PaymentMethod;
@@ -58,7 +63,7 @@ const emptyProductForm: ProductFormPayload = {
   qr_code: "",
   sku: "",
   price: "",
-  cost: "",
+  cost: "0",
   category_id: null,
   initial_stock: 0,
   minimum_stock: 5,
@@ -75,15 +80,17 @@ export function POSPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [defaultCustomer, setDefaultCustomer] = useState<Customer | null>(null);
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | "">("");
+  const workspace = useOpenSales();
+  const { cart, customerId: selectedCustomerId, discountType, discountValue, notes } = workspace.editor;
+  const { setCart, setCustomerId: setSelectedCustomerId, setDiscountType, setDiscountValue } = workspace;
+  const [cancelSaleOpen, setCancelSaleOpen] = useState(false);
+  const [reloadSalesOpen, setReloadSalesOpen] = useState(false);
+  const [reviewSaleOpen, setReviewSaleOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [search, setSearch] = useState("");
   const [stockFilter, setStockFilter] = useState<"ALL" | "AVAILABLE" | "LOW" | "OUT">("ALL");
-  const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [cashReceived, setCashReceived] = useState("");
-  const [discountType, setDiscountType] = useState<DiscountType>("NONE");
-  const [discountValue, setDiscountValue] = useState("");
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loadingSale, setLoadingSale] = useState(false);
@@ -100,6 +107,7 @@ export function POSPage() {
   const [productForm, setProductForm] = useState<ProductFormPayload>(emptyProductForm);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  const receiptPrinter = useReceiptPrinter();
 
   const loadProducts = useCallback(async () => {
     setProducts(await listProducts(search));
@@ -110,7 +118,6 @@ export function POSPage() {
     const merged = records.some((customer) => customer.id === defaultRecord.id) ? records : [defaultRecord, ...records];
     setDefaultCustomer(defaultRecord);
     setCustomers(merged);
-    setSelectedCustomerId((current) => current || defaultRecord.id);
   }, []);
 
   useEffect(() => {
@@ -119,7 +126,7 @@ export function POSPage() {
 
   useEffect(() => {
     loadCustomers();
-  }, [loadCustomers]);
+  }, [loadCustomers, workspace.active?.id]);
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => undefined);
@@ -146,6 +153,7 @@ export function POSPage() {
 
   const visibleProducts = useMemo(() => {
     return products.filter((product) => {
+      if (!tracksInventory(product)) return stockFilter === "ALL" || stockFilter === "AVAILABLE";
       const stock = product.inventory?.quantity ?? 0;
       if (stockFilter === "AVAILABLE") {
         return stock > 0;
@@ -164,8 +172,8 @@ export function POSPage() {
     () => cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0),
     [cart],
   );
-  const taxPercentage = Number(businessSettings?.tax_percentage ?? 0);
-  const tax = subtotal * taxPercentage / 100;
+  const taxPercentage = Number(workspace.active?.tax_percentage ?? businessSettings?.tax_percentage ?? 0);
+  const tax = Number((subtotal * taxPercentage / 100).toFixed(2));
   const totalBeforeDiscount = subtotal + tax;
   const parsedDiscountValue = Number(discountValue || 0);
   const discountNumericValue = Number.isFinite(parsedDiscountValue) ? parsedDiscountValue : 0;
@@ -174,18 +182,18 @@ export function POSPage() {
       return Math.max(discountNumericValue, 0);
     }
     if (discountType === "PERCENTAGE") {
-      return totalBeforeDiscount * Math.max(discountNumericValue, 0) / 100;
+      return Number((totalBeforeDiscount * Math.max(discountNumericValue, 0) / 100).toFixed(2));
     }
     return 0;
   }, [discountNumericValue, discountType, totalBeforeDiscount]);
-  const total = Math.max(totalBeforeDiscount - discountAmount, 0);
+  const total = Number(Math.max(totalBeforeDiscount - discountAmount, 0).toFixed(2));
   const cashAmount = Number(cashReceived || 0);
   const cashChange = Math.max(cashAmount - total, 0);
-  const currencyCode = businessSettings?.currency ?? "COP";
+  const currencyCode = normalizeCurrency(workspace.active?.currency ?? businessSettings?.currency);
 
   const addToCart = useCallback((product: Product) => {
     const stock = product.inventory?.quantity ?? 0;
-    if (stock <= 0) {
+    if (tracksInventory(product) && stock <= 0) {
       setMessage("Este producto no tiene stock disponible.");
       return;
     }
@@ -193,7 +201,7 @@ export function POSPage() {
     setCart((current) => {
       const existing = current.find((item) => item.product.id === product.id);
       const currentQuantity = existing?.quantity ?? 0;
-      if (currentQuantity + 1 > stock) {
+      if (tracksInventory(product) && currentQuantity + 1 > stock) {
         setMessage("No hay stock suficiente para agregar más unidades.");
         return current;
       }
@@ -204,21 +212,24 @@ export function POSPage() {
       }
       return [...current, { product, quantity: 1 }];
     });
-  }, []);
+  }, [setCart]);
 
   const handleScan = useCallback(
     async (barcodeValue: string) => {
+      const targetSaleId = workspace.active?.id;
       try {
         const product = await findProductByBarcode(barcodeValue);
+        if (!workspace.isActive(targetSaleId)) { setMessage("Cambió la venta activa. Escanea nuevamente el producto."); return; }
         addToCart(product);
         setMessage(`${product.name} agregado por código de barras.`);
       } catch {
+        if (!workspace.isActive(targetSaleId)) return;
         setScannedCode(barcodeValue);
         setScanNotFoundModalOpen(true);
         setMessage("No se encontró un producto activo con ese código.");
       }
     },
-    [addToCart],
+    [addToCart, workspace.active?.id, workspace.isActive],
   );
 
   function changeQuantity(productId: number, delta: number) {
@@ -229,7 +240,11 @@ export function POSPage() {
             return item;
           }
           const stock = item.product.inventory?.quantity ?? 0;
-          const nextQuantity = Math.min(stock, item.quantity + delta);
+          if (tracksInventory(item.product) && delta > 0 && item.quantity + delta > stock) {
+            setMessage("No hay stock suficiente para agregar más unidades.");
+            return item;
+          }
+          const nextQuantity = Math.max(0, item.quantity + delta);
           return { ...item, quantity: nextQuantity };
         })
         .filter((item) => item.quantity > 0),
@@ -249,11 +264,6 @@ export function POSPage() {
       setMessage("La configuración del negocio todavía no está disponible.");
       return false;
     }
-    const invalidStock = cart.find((item) => item.quantity > (item.product.inventory?.quantity ?? 0));
-    if (invalidStock) {
-      setMessage(`Stock insuficiente para ${invalidStock.product.name}.`);
-      return false;
-    }
     if (discountType === "FIXED" && (discountNumericValue <= 0 || discountNumericValue > totalBeforeDiscount)) {
       setMessage("El descuento fijo debe ser mayor que 0 y no superar el subtotal más impuestos.");
       return false;
@@ -265,13 +275,22 @@ export function POSPage() {
     return true;
   }
 
-  function startCheckout() {
+  async function startCheckout() {
+    const targetSaleId = workspace.active?.id;
     setMessage(null);
     if (!validateSale()) {
       return;
     }
-    setCashReceived("");
-    setPaymentModalOpen(true);
+    try {
+      const currentSettings = await getSettings();
+      if (!workspace.isActive(targetSaleId)) return;
+      setBusinessSettings(currentSettings);
+      const checked = await workspace.validate();
+      if (!workspace.isActive(targetSaleId)) return;
+      if (checked.issues.length) { setReviewSaleOpen(true); return; }
+      setCashReceived("");
+      setPaymentModalOpen(true);
+    } catch { /* The workspace displays persistence errors. */ }
   }
 
   function confirmPayment() {
@@ -300,25 +319,22 @@ export function POSPage() {
 
     setLoadingSale(true);
     try {
-      const saleItems = cart.map((item) => ({ product_id: item.product.id, quantity: item.quantity }));
-      const saleResponse = await createSale({
-        customer_id: selectedCustomer.id,
-        items: saleItems,
-        payment: {
+      const saleResponse = await workspace.complete({
           method: paymentDraft.method,
           amount: paymentDraft.receivedAmount.toFixed(2),
-        },
-        tipo_descuento: discountType,
-        valor_descuento: discountType === "NONE" ? "0.00" : discountNumericValue.toFixed(2),
       });
       const receiptData: ReceiptData = {
         sale: saleResponse,
-        items: cart,
+        items: saleResponse.details.map((detail) => ({ quantity: detail.quantity, product: {
+          ...(cart.find((item) => item.product.id === detail.product_id)?.product ?? {
+            id: detail.product_id ?? 0, sku: detail.product_sku ?? "", cost: "0", is_active: true,
+          }), name: detail.product_name, price: detail.unit_price,
+        } })),
         customer: selectedCustomer,
         cashierName: fullName ?? "Cajero",
-        paymentMethod: paymentDraft.method,
-        receivedAmount: paymentDraft.receivedAmount,
-        changeAmount: paymentDraft.changeAmount,
+        paymentMethod: saleResponse.payment.method,
+        receivedAmount: Number(saleResponse.payment.amount),
+        changeAmount: Math.max(0, Number(saleResponse.payment.amount) - Number(saleResponse.total)),
         subtotal: Number(saleResponse.subtotal),
         tax: Number(saleResponse.tax_amount ?? saleResponse.tax),
         discount: Number(saleResponse.monto_descuento ?? 0),
@@ -327,16 +343,22 @@ export function POSPage() {
         logoUrl: logoImg,
       };
       setReceipt(receiptData);
-      setCart([]);
       setCashReceived("");
-      setDiscountType("NONE");
-      setDiscountValue("");
       setPaymentDraft(null);
       setConfirmModalOpen(false);
       setMessage("Venta registrada correctamente.");
-      await loadProducts();
+      void workspace.create().catch(() => undefined);
+      void loadProducts().catch(() => setMessage("Venta registrada. No fue posible actualizar el catálogo."));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No fue posible registrar la venta.");
+      setMessage(openSaleError(error));
+      if (isAxiosError<{ detail?: { code?: string } }>(error) && error.response?.data.detail?.code === "OPEN_SALE_CHANGED") {
+        try {
+          await workspace.validate();
+          setConfirmModalOpen(false);
+          setPaymentDraft(null);
+          setReviewSaleOpen(true);
+        } catch { /* Keep the original checkout available for an explicit retry. */ }
+      }
     } finally {
       setLoadingSale(false);
     }
@@ -397,6 +419,7 @@ export function POSPage() {
   }
 
   async function saveScannedProduct() {
+    const targetSaleId = workspace.active?.id;
     if (!productForm.name || !productForm.sku || !productForm.price || !productForm.cost) {
       setMessage("Completa nombre, SKU, precio de venta y precio de compra.");
       return;
@@ -410,11 +433,14 @@ export function POSPage() {
     setProductModalOpen(false);
     setMessage("Producto creado desde el código escaneado.");
     await loadProducts();
-    addToCart(product);
+    if (workspace.isActive(targetSaleId)) addToCart(product);
   }
 
   return (
-    <section className="flex min-h-[calc(100vh-9rem)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white lg:flex-row">
+    <div>
+    <OpenSalesBar workspace={workspace} onCancel={() => setCancelSaleOpen(true)} onReload={() => setReloadSalesOpen(true)} />
+    <fieldset disabled={workspace.loading || workspace.busy || loadingSale} className="min-w-0">
+    <section className="flex min-h-[calc(100vh-12rem)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white lg:flex-row">
       <div className="flex min-w-0 flex-1 flex-col bg-[#F8FAFC]">
         <div className="space-y-4 border-b border-gray-200 bg-white p-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -475,7 +501,7 @@ export function POSPage() {
                     key={product.id}
                     onClick={() => addToCart(product)}
                     className="overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-sm transition hover:border-[#1B8A5A]/40 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={stock <= 0}
+                    disabled={(tracksInventory(product) && stock <= 0) || !workspace.active}
                   >
                     {imageUrl ? (
                       <img src={imageUrl} alt={product.name} className="h-32 w-full object-cover" />
@@ -491,8 +517,8 @@ export function POSPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-lg font-bold text-[#1B8A5A]">{formatMoney(product.price, currencyCode)}</span>
-                        <span className={`text-xs ${stock <= 0 ? "text-red-600" : product.inventory?.low_stock ? "text-amber-600" : "text-gray-500"}`}>
-                          {stock} unidades
+                        <span className={`text-xs ${!tracksInventory(product) ? "text-teal-700" : stock <= 0 ? "text-red-600" : product.inventory?.low_stock ? "text-amber-600" : "text-gray-500"}`}>
+                          {tracksInventory(product) ? `${stock} unidades` : "Servicio"}
                         </span>
                       </div>
                     </div>
@@ -549,7 +575,13 @@ export function POSPage() {
               <Eye className="h-4 w-4" />
             </button>
           </div>
-          <p className="text-xs text-gray-500">Usa el cliente predeterminado o registra uno antes de facturar.</p>
+          <p className="text-xs text-gray-500">Usa Cliente final o registra uno antes de facturar.</p>
+          <label className="block text-sm font-medium text-gray-700">Observaciones
+            <textarea value={notes} maxLength={2000} rows={2} onChange={(event) => workspace.setNotes(event.target.value)}
+              className="mt-1 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          </label>
+          {workspace.active?.issues.some((issue) => issue.code !== "EMPTY") && <button type="button" onClick={() => setReviewSaleOpen(true)}
+            className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">Revisar cambios de precio, impuesto o disponibilidad</button>}
         </div>
 
         <div className="min-h-[240px] flex-1 overflow-y-auto p-4">
@@ -635,13 +667,14 @@ export function POSPage() {
           <button onClick={startCheckout} className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">
             Procesar Pago
           </button>
-          <button onClick={() => setCart([])} className="w-full rounded-lg border border-gray-300 px-4 py-3 font-medium text-gray-700 hover:bg-gray-50">
+          <button onClick={() => setCancelSaleOpen(true)} className="w-full rounded-lg border border-gray-300 px-4 py-3 font-medium text-gray-700 hover:bg-gray-50">
             Cancelar Venta
           </button>
         </div>
       </aside>
 
       <ReusableModal open={paymentModalOpen} title="Procesar pago" onClose={() => setPaymentModalOpen(false)}>
+        {workspace.error && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{workspace.error}</p>}
         <div className="space-y-5">
           <div className="rounded-lg bg-emerald-50 p-4 text-center">
             <p className="text-sm text-gray-500">Total final a pagar</p>
@@ -711,6 +744,7 @@ export function POSPage() {
       </ReusableModal>
 
       <ReusableModal open={confirmModalOpen} title="Confirmar venta" onClose={() => setConfirmModalOpen(false)}>
+        {workspace.error && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{workspace.error}</p>}
         <div className="space-y-4">
           <p className="text-sm text-gray-600">Revisa los datos antes de registrar la venta.</p>
           <div className="rounded-lg border border-gray-200 p-4 text-sm">
@@ -752,6 +786,7 @@ export function POSPage() {
 
       <ReusableModal open={productModalOpen} title="Crear producto escaneado" onClose={() => setProductModalOpen(false)}>
         <form onSubmit={(event) => { event.preventDefault(); saveScannedProduct(); }} className="grid gap-3 md:grid-cols-2">
+          <label className="text-sm font-medium md:col-span-2">Tipo de articulo<select value={productForm.article_type ?? "PRODUCT"} onChange={(event) => setProductForm({ ...productForm, article_type: event.target.value === "SERVICE" ? "SERVICE" : "PRODUCT" })} className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2"><option value="PRODUCT">Producto</option><option value="SERVICE">Servicio</option></select></label>
           <input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Nombre" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input value={productForm.sku} onChange={(event) => setProductForm({ ...productForm, sku: event.target.value })} placeholder="SKU" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input value={productForm.barcode ?? ""} onChange={(event) => setProductForm({ ...productForm, barcode: event.target.value })} placeholder="Código de barras" className="rounded-lg border border-gray-300 px-3 py-2" />
@@ -766,8 +801,10 @@ export function POSPage() {
             <input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Nueva categoría" className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2" />
             <button type="button" onClick={saveCategory} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Crear</button>
           </div>
+          {productForm.article_type !== "SERVICE" && <>
           <input type="number" value={productForm.initial_stock} onChange={(event) => setProductForm({ ...productForm, initial_stock: Number(event.target.value) })} placeholder="Stock" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input type="number" value={productForm.minimum_stock} onChange={(event) => setProductForm({ ...productForm, minimum_stock: Number(event.target.value) })} placeholder="Stock mínimo" className="rounded-lg border border-gray-300 px-3 py-2" />
+          </>}
           <textarea value={productForm.description ?? ""} onChange={(event) => setProductForm({ ...productForm, description: event.target.value })} placeholder="Descripción" className="rounded-lg border border-gray-300 px-3 py-2 md:col-span-2" />
           <button className="rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] md:col-span-2">
             Guardar producto
@@ -830,12 +867,13 @@ export function POSPage() {
             <p className="text-sm font-medium">¿Desea imprimir o guardar el recibo?</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <button onClick={() => receipt && downloadReceiptPdf(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+            <button disabled={receiptPrinter.busy} onClick={() => receipt && void receiptPrinter.run(receipt, "download")} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50 disabled:opacity-50">
               <Download className="h-4 w-4" /> Guardar PDF
             </button>
-            <button onClick={() => receipt && printReceiptPdf(receipt)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50">
+            <button disabled={receiptPrinter.busy} onClick={() => receipt && void receiptPrinter.run(receipt, "print")} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-3 font-medium hover:bg-gray-50 disabled:opacity-50">
               <Printer className="h-4 w-4" /> Imprimir
             </button>
+            {receiptPrinter.error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 sm:col-span-2">{receiptPrinter.error}</p>}
             <button onClick={() => setReceipt(null)} className="rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">
               Cerrar
             </button>
@@ -843,5 +881,43 @@ export function POSPage() {
         </div>
       </ReusableModal>
     </section>
+    </fieldset>
+    <ReusableModal open={cancelSaleOpen} title="Cancelar venta pendiente" onClose={() => setCancelSaleOpen(false)}>
+      <p className="mb-5 text-sm text-gray-700">¿Descartar esta venta de {workspace.active?.customer_name ?? "cliente sin asignar"}?</p>
+      <div className="flex justify-end gap-3">
+        <button type="button" onClick={() => setCancelSaleOpen(false)} className="rounded-lg border px-4 py-2">Conservar venta</button>
+        <button type="button" disabled={workspace.busy} onClick={() => void workspace.cancel().then(() => setCancelSaleOpen(false)).catch(() => undefined)} className="rounded-lg bg-red-600 px-4 py-2 text-white">Cancelar venta</button>
+      </div>
+    </ReusableModal>
+    <ReusableModal open={reloadSalesOpen} title="Recargar ventas guardadas" onClose={() => setReloadSalesOpen(false)}>
+      <p className="mb-5 text-sm text-gray-700">Los cambios que no se hayan guardado en esta ventana serán descartados.</p>
+      <div className="flex justify-end gap-3">
+        <button type="button" onClick={() => setReloadSalesOpen(false)} className="rounded-lg border px-4 py-2">Volver</button>
+        <button type="button" disabled={workspace.busy} onClick={() => void workspace.reload().then(() => setReloadSalesOpen(false)).catch(() => undefined)} className="rounded-lg bg-emerald-700 px-4 py-2 text-white">Recargar</button>
+      </div>
+    </ReusableModal>
+    <ReusableModal open={reviewSaleOpen} title="Revisar venta antes de cobrar" onClose={() => setReviewSaleOpen(false)}>
+      <ul className="mb-5 max-h-72 space-y-2 overflow-y-auto text-sm text-gray-700">
+        {workspace.active?.issues.map((issue, index) => {
+          const name = workspace.active?.lines.find((line) => line.original_product_id === issue.product_id)?.product_name;
+          const labels: Record<string, string> = {
+            EMPTY: "Agrega productos a la venta.", CUSTOMER_MISSING: "Selecciona un cliente válido.",
+            PRICE_CHANGED: `${name}: cambió el precio. Precio vigente: ${formatMoney(issue.current_price ?? 0, currencyCode)}.`,
+            PRODUCT_INACTIVE: `${name}: producto desactivado.`, PRODUCT_MISSING: `${name}: producto eliminado.`,
+            INSUFFICIENT_STOCK: `${name}: existencias disponibles ${issue.available_stock ?? 0}. Corrige la cantidad.`,
+            TAX_CHANGED: "Cambió el porcentaje de impuesto del negocio.", CURRENCY_CHANGED: "Cambió la moneda del negocio.",
+            INVALID_DISCOUNT: "Corrige el descuento antes de continuar.",
+          };
+          return <li key={`${issue.code}-${index}`} className="rounded-lg bg-amber-50 p-3">{labels[issue.code] ?? issue.message}</li>;
+        })}
+      </ul>
+      <div className="flex flex-wrap justify-end gap-3">
+        <button type="button" onClick={() => setReviewSaleOpen(false)} className="rounded-lg border px-4 py-2">Corregir venta</button>
+        {workspace.active?.issues.some((issue) => ["PRICE_CHANGED", "TAX_CHANGED", "CURRENCY_CHANGED"].includes(issue.code)) &&
+          <button type="button" disabled={workspace.busy} onClick={() => void workspace.reprice().then((sale) => { if (!sale.issues.length) setReviewSaleOpen(false); }).catch(() => undefined)}
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-white">Aceptar valores vigentes</button>}
+      </div>
+    </ReusableModal>
+    </div>
   );
 }

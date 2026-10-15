@@ -1,10 +1,11 @@
 import { jsPDF } from "jspdf";
-
 import type { Customer } from "../services/customerService";
-import type { BusinessSettings } from "../services/settingService";
+import { getSettings, type BusinessSettings } from "../services/settingService";
 import type { CartItem, PaymentMethod } from "../types/api";
 import { resolveMediaUrl } from "./media";
-import { formatMoney } from "./money";
+import { getBusinessPrintPreferences, normalizePrintPreferences, PAPER_FORMATS, type PrintPreferences } from "./printPreferences";
+import { createReceiptLayout, type ReceiptBlock } from "./receiptLayout";
+import { buildReceiptPrintHtml, printReceiptDocument, type ReceiptPrintDocument, type ReceiptPrintPage } from "./receiptPrintDocument";
 
 export interface ReceiptSale {
   id: number;
@@ -18,8 +19,8 @@ export interface ReceiptData {
   customer: Customer;
   cashierName: string;
   paymentMethod: PaymentMethod;
-  receivedAmount: number;
-  changeAmount: number;
+  receivedAmount?: number;
+  changeAmount?: number;
   subtotal: number;
   tax: number;
   discount: number;
@@ -28,223 +29,167 @@ export interface ReceiptData {
   logoUrl: string;
 }
 
-const paymentLabels: Record<PaymentMethod, string> = {
-  CASH: "Efectivo",
-  CARD: "Tarjeta",
-  TRANSFER: "Transferencia",
-};
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    const replacements: Record<string, string> = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#039;",
-    };
-    return replacements[char];
-  });
-}
-
-function businessLogoUrl(data: ReceiptData): string {
-  return resolveMediaUrl(data.businessSettings.logo_url) ?? data.logoUrl;
-}
-
-async function toImageDataUrl(url: string): Promise<string | null> {
-  try {
+async function loadLogo(url: string): Promise<string | null> {
+  if (url.startsWith("data:image/")) return url;
+  if (typeof Image === "undefined" || !url) return null;
+  return new Promise((resolve) => {
     const image = new Image();
+    const timeout = window.setTimeout(() => resolve(null), 3000);
     image.crossOrigin = "anonymous";
+    image.onload = () => {
+      window.clearTimeout(timeout);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context) return resolve(null);
+        context.drawImage(image, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      } catch { resolve(null); }
+    };
+    image.onerror = () => { window.clearTimeout(timeout); resolve(null); };
     image.src = url;
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("Image could not be loaded"));
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    context.drawImage(image, 0, 0);
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
-  }
-}
-
-export function buildReceiptHtml(data: ReceiptData): string {
-  const rows = data.items
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.product.name)}</td>
-          <td>${item.quantity}</td>
-          <td>${formatMoney(Number(item.product.price), data.businessSettings.currency)}</td>
-          <td>${formatMoney(Number(item.product.price) * item.quantity, data.businessSettings.currency)}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="es">
-      <head>
-        <meta charset="utf-8" />
-        <title>Recibo ${escapeHtml(data.sale.invoice_number)}</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 32px; color: #111827; }
-          header { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #d1d5db; padding-bottom: 16px; }
-          img { width: 72px; height: 72px; object-fit: contain; }
-          h1 { margin: 0; color: #1B8A5A; }
-          table { width: 100%; border-collapse: collapse; margin-top: 24px; }
-          th, td { border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; }
-          th { background: #ecfdf5; }
-          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
-          .totals { margin-left: auto; width: 320px; margin-top: 24px; }
-          .totals div { display: flex; justify-content: space-between; padding: 6px 0; }
-          .total { color: #1B8A5A; font-weight: 700; font-size: 20px; }
-          footer { border-top: 1px solid #d1d5db; margin-top: 32px; padding-top: 16px; display: flex; gap: 12px; align-items: center; color: #1E4E5F; }
-          footer img { width: 42px; height: 42px; }
-          @media print { button { display: none; } body { margin: 18px; } }
-        </style>
-      </head>
-      <body>
-        <button onclick="window.print()">Imprimir</button>
-        <header>
-          <img src="${businessLogoUrl(data)}" alt="Logo del negocio" />
-          <div>
-            <h1>${escapeHtml(data.businessSettings.business_name)}</h1>
-            <p>NIT/Documento: ${escapeHtml(data.businessSettings.tax_id)}</p>
-            <p>${escapeHtml(data.businessSettings.address)} - ${escapeHtml(data.businessSettings.city)}</p>
-            <p>Tel: ${escapeHtml(data.businessSettings.phone)} | ${escapeHtml(data.businessSettings.email)}</p>
-          </div>
-        </header>
-        <div class="grid">
-          <div><strong>Factura:</strong> ${escapeHtml(data.sale.invoice_number)}</div>
-          <div><strong>Fecha:</strong> ${new Date(data.sale.created_at).toLocaleString()}</div>
-          <div><strong>Cajero:</strong> ${escapeHtml(data.cashierName)}</div>
-          <div><strong>Cliente:</strong> ${escapeHtml(data.customer.name)}</div>
-          <div><strong>Documento:</strong> ${escapeHtml(data.customer.document_number ?? "N/A")}</div>
-          <div><strong>Pago:</strong> ${paymentLabels[data.paymentMethod]}</div>
-        </div>
-        <table>
-          <thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Total</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <section class="totals">
-          <div><span>Subtotal</span><span>${formatMoney(data.subtotal, data.businessSettings.currency)}</span></div>
-          <div><span>Impuesto ${Number(data.businessSettings.tax_percentage).toFixed(2)}%</span><span>${formatMoney(data.tax, data.businessSettings.currency)}</span></div>
-          <div><span>Descuento</span><span>-${formatMoney(data.discount, data.businessSettings.currency)}</span></div>
-          <div class="total"><span>Total final</span><span>${formatMoney(data.total, data.businessSettings.currency)}</span></div>
-          <div><span>Recibido</span><span>${formatMoney(data.receivedAmount, data.businessSettings.currency)}</span></div>
-          <div><span>Cambio</span><span>${formatMoney(data.changeAmount, data.businessSettings.currency)}</span></div>
-        </section>
-        <footer>
-          <img src="${data.logoUrl}" alt="Logo MeynaPOS" />
-          <div>
-            <strong>MeynaPOS</strong>
-            <div>Tecnología desarrollada por MeynaPOS — Tecnología para crecer juntos</div>
-          </div>
-        </footer>
-      </body>
-    </html>
-  `;
-}
-
-function writeLine(pdf: jsPDF, text: string, x: number, y: number, options?: { bold?: boolean; size?: number }) {
-  pdf.setFont("helvetica", options?.bold ? "bold" : "normal");
-  pdf.setFontSize(options?.size ?? 10);
-  pdf.text(text, x, y);
-}
-
-export async function downloadReceiptPdf(data: ReceiptData): Promise<void> {
-  const pdf = await createReceiptPdf(data);
-  pdf.save(`recibo-${data.sale.invoice_number}.pdf`);
-}
-
-async function createReceiptPdf(data: ReceiptData): Promise<jsPDF> {
-  const pdf = new jsPDF({ unit: "pt", format: "letter" });
-  const businessLogo = await toImageDataUrl(businessLogoUrl(data));
-  const meynaLogo = await toImageDataUrl(data.logoUrl);
-
-  if (businessLogo) pdf.addImage(businessLogo, "PNG", 40, 32, 64, 64);
-  writeLine(pdf, data.businessSettings.business_name, 120, 48, { bold: true, size: 16 });
-  writeLine(pdf, `NIT/Documento: ${data.businessSettings.tax_id}`, 120, 66);
-  writeLine(pdf, `${data.businessSettings.address} - ${data.businessSettings.city}`, 120, 82);
-  writeLine(pdf, `Tel: ${data.businessSettings.phone} | ${data.businessSettings.email}`, 120, 98);
-
-  writeLine(pdf, `Factura: ${data.sale.invoice_number}`, 40, 138, { bold: true });
-  writeLine(pdf, `Fecha: ${new Date(data.sale.created_at).toLocaleString()}`, 320, 138);
-  writeLine(pdf, `Cajero: ${data.cashierName}`, 40, 156);
-  writeLine(pdf, `Cliente: ${data.customer.name}`, 320, 156);
-  writeLine(pdf, `Documento cliente: ${data.customer.document_number ?? "N/A"}`, 40, 174);
-  writeLine(pdf, `Método de pago: ${paymentLabels[data.paymentMethod]}`, 320, 174);
-
-  let y = 220;
-  writeLine(pdf, "Producto", 40, y, { bold: true });
-  writeLine(pdf, "Cant.", 310, y, { bold: true });
-  writeLine(pdf, "Precio", 380, y, { bold: true });
-  writeLine(pdf, "Subtotal", 470, y, { bold: true });
-  y += 18;
-  data.items.forEach((item) => {
-    const name = item.product.name.slice(0, 38);
-    writeLine(pdf, name, 40, y);
-    writeLine(pdf, String(item.quantity), 310, y);
-    writeLine(pdf, formatMoney(Number(item.product.price), data.businessSettings.currency), 380, y);
-    writeLine(pdf, formatMoney(Number(item.product.price) * item.quantity, data.businessSettings.currency), 470, y);
-    y += 18;
   });
+}
 
-  y += 22;
-  writeLine(pdf, `Subtotal general: ${formatMoney(data.subtotal, data.businessSettings.currency)}`, 360, y);
-  y += 18;
-  writeLine(pdf, `Impuesto aplicado: ${Number(data.businessSettings.tax_percentage).toFixed(2)}%`, 360, y);
-  y += 18;
-  writeLine(pdf, `Valor del impuesto: ${formatMoney(data.tax, data.businessSettings.currency)}`, 360, y);
-  y += 18;
-  writeLine(pdf, `Descuento: -${formatMoney(data.discount, data.businessSettings.currency)}`, 360, y);
-  y += 18;
-  writeLine(pdf, `Total final: ${formatMoney(data.total, data.businessSettings.currency)}`, 360, y, { bold: true, size: 13 });
-  y += 18;
-  writeLine(pdf, `Valor recibido: ${formatMoney(data.receivedAmount, data.businessSettings.currency)}`, 360, y);
-  y += 18;
-  writeLine(pdf, `Cambio: ${formatMoney(data.changeAmount, data.businessSettings.currency)}`, 360, y);
+export async function prepareReceiptDocument(data: ReceiptData, options?: PrintPreferences): Promise<ReceiptPrintDocument> {
+  const preferences = normalizePrintPreferences(options ?? getBusinessPrintPreferences(data.businessSettings));
+  const paper = PAPER_FORMATS[preferences.format];
+  const brandLogo = await loadLogo(data.logoUrl);
+  if (!brandLogo) throw new Error("No fue posible cargar el logo obligatorio de MeynaPOS.");
+  const logo = preferences.showLogo
+    ? await loadLogo(resolveMediaUrl(data.businessSettings.logo_url) ?? data.logoUrl) : null;
+  const blocks = createReceiptLayout(data, preferences).filter((block) => block.logo !== "business" || logo);
+  const footer = blocks.filter((block) => block.footer);
+  const footerHeight = footer.reduce((sum, block) => sum + block.height, 0);
+  const height = paper.height ?? Math.min(5000, Math.max(paper.width,
+    blocks.reduce((sum, block) => sum + block.height, 0) + preferences.margin * 2 + 4));
+  const pdf = new jsPDF({ unit: "mm", format: [paper.width, height], orientation: "portrait" });
+  const pages: ReceiptPrintPage[] = [{ width: paper.width, height, commands: [] }];
+  let currentPage = pages[0];
+  const margin = preferences.margin;
+  let bottom = height - margin - footerHeight;
+  const tableHeader = blocks.find((block) => block.tableHeader);
+  let y = margin;
 
-  const footerY = 710;
-  pdf.line(40, footerY - 18, 572, footerY - 18);
-  if (meynaLogo) pdf.addImage(meynaLogo, "PNG", 40, footerY, 36, 36);
-  writeLine(pdf, "MeynaPOS", 86, footerY + 12, { bold: true, size: 12 });
-  writeLine(pdf, "Tecnología desarrollada por MeynaPOS — Tecnología para crecer juntos", 86, footerY + 30);
+  function newPage(): void {
+    if (!paper.height) currentPage.height = Math.max(1, y + margin);
+    currentPage = { width: paper.width, height, commands: [] };
+    pages.push(currentPage);
+    y = margin;
+  }
+  function draw(block: ReceiptBlock, allowHeader = true): void {
+    if (block.divider) {
+      currentPage.commands.push({ kind: "line", x1: margin, x2: paper.width - margin, y: y + 1, color: "#6b7280", width: 0.25 });
+      y += block.height;
+      return;
+    }
+    if (block.logo) {
+      if (y + block.height > bottom) newPage();
+      const imageData = block.logo === "brand" ? brandLogo : logo;
+      if (imageData) {
+        const image = pdf.getImageProperties(imageData);
+        const imageSize = block.logo === "brand" ? 10 : 18;
+        const factor = Math.min(imageSize / image.width, imageSize / image.height);
+        const imageWidth = image.width * factor;
+        currentPage.commands.push({ kind: "image", data: imageData, x: (paper.width - imageWidth) / 2, y,
+          width: imageWidth, height: image.height * factor });
+      }
+      y += block.height;
+      return;
+    }
+    const available = height - margin * 2;
+    if (y + block.height > bottom && block.height <= available) {
+      newPage();
+      if (block.tableRow && tableHeader && allowHeader) draw(tableHeader, false);
+    }
+    const lines = Math.max(1, ...block.cells.map((cell) => cell.length));
+    for (let line = 0; line < lines; line += 1) {
+      if (y + block.lineHeight > bottom) {
+        newPage();
+        if (block.tableRow && tableHeader && allowHeader) draw(tableHeader, false);
+      }
+      let x = margin;
+      block.cells.forEach((cell, index) => {
+        if (cell[line]) {
+          const rightAligned = index > 0 && !block.tableHeader;
+          currentPage.commands.push({ kind: "text", text: cell[line],
+            x: block.centered ? paper.width / 2 : rightAligned ? x + block.widths[index] - 1 : x + 1,
+            y: y + block.lineHeight * 0.78, size: block.size, bold: block.bold,
+            align: block.centered ? "center" : rightAligned ? "right" : "left" });
+        }
+        x += block.widths[index];
+      });
+      y += block.lineHeight;
+    }
+    if (block.tableRow || block.tableHeader) {
+      currentPage.commands.push({ kind: "line", x1: margin, x2: paper.width - margin, y: y + 0.5, color: "#d1d5db", width: 0.2 });
+    }
+    y += 2;
+  }
+  const content = blocks.filter((block) => !block.footer);
+  const totalsHeight = content.filter((block) => block.group === "totals").reduce((sum, block) => sum + block.height, 0);
+  content.forEach((block, index) => {
+    if (block.group === "totals" && content[index - 1]?.group !== "totals"
+      && totalsHeight <= bottom - margin && y + totalsHeight > bottom) newPage();
+    draw(block);
+  });
+  if (paper.height) y = height - margin - footerHeight;
+  else if (y + footerHeight > height - margin) newPage();
+  bottom = height - margin;
+  footer.forEach((block) => draw(block));
+  if (!paper.height) currentPage.height = Math.max(1, y + margin);
+  return { title: `Factura ${data.sale.invoice_number}`, pages };
+}
 
+export async function createReceiptPdf(data: ReceiptData, options?: PrintPreferences): Promise<jsPDF> {
+  const document = await prepareReceiptDocument(data, options);
+  const first = document.pages[0];
+  const orientation = (page: ReceiptPrintPage) => page.width > page.height ? "landscape" as const : "portrait" as const;
+  const pdf = new jsPDF({ unit: "mm", format: [first.width, first.height], orientation: orientation(first) });
+  document.pages.forEach((page, index) => {
+    if (index > 0) pdf.addPage([page.width, page.height], orientation(page));
+    page.commands.forEach((command) => {
+      if (command.kind === "image") pdf.addImage(command.data, "PNG", command.x, command.y, command.width, command.height);
+      else if (command.kind === "line") {
+        pdf.setDrawColor(command.color);
+        pdf.setLineWidth(command.width);
+        pdf.line(command.x1, command.y, command.x2, command.y);
+      } else {
+        pdf.setFont("helvetica", command.bold ? "bold" : "normal");
+        pdf.setFontSize(command.size);
+        pdf.setTextColor(command.bold ? "#166534" : "#111827");
+        pdf.text(command.text, command.x, command.y, { align: command.align });
+      }
+    });
+  });
+  pdf.setDisplayMode("fullwidth", "continuous");
   return pdf;
 }
 
-export async function printReceiptPdf(data: ReceiptData): Promise<void> {
-  const pdf = await createReceiptPdf(data);
-  pdf.autoPrint();
-  const blobUrl = pdf.output("bloburl");
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "0";
-  iframe.src = String(blobUrl);
-  document.body.appendChild(iframe);
-  iframe.onload = () => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-  };
+export async function resolveReceiptForPrinting(data: ReceiptData): Promise<ReceiptData> {
+  const settings = await getSettings();
+  if (settings.id !== data.businessSettings.id) {
+    throw new Error("El comprobante no pertenece al negocio activo.");
+  }
+  return { ...data, businessSettings: settings };
+}
+
+export async function downloadReceiptPdf(data: ReceiptData): Promise<void> {
+  const pdf = await createReceiptPdf(await resolveReceiptForPrinting(data));
+  pdf.save(`recibo-${data.sale.invoice_number}.pdf`);
+}
+
+export async function printReceiptPdf(data: ReceiptData, preferences?: PrintPreferences): Promise<void> {
+  const current = preferences ? data : await resolveReceiptForPrinting(data);
+  await printReceiptDocument(await prepareReceiptDocument(current, preferences));
+}
+
+export async function buildReceiptHtml(data: ReceiptData, options?: PrintPreferences): Promise<string> {
+  return buildReceiptPrintHtml(await prepareReceiptDocument(data, options));
 }
 
 export function openReceiptWindow(data: ReceiptData): void {
-  const receiptWindow = window.open("", "_blank", "width=900,height=720");
-  if (!receiptWindow) {
-    void downloadReceiptPdf(data);
-    return;
-  }
-  receiptWindow.document.write(buildReceiptHtml(data));
-  receiptWindow.document.close();
+  void printReceiptPdf(data);
 }

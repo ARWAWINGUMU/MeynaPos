@@ -28,7 +28,7 @@ def db_session() -> Session:
     cashier_role = Role(name=RoleName.CASHIER, description="Cashier role")
     db.add_all([admin_role, cashier_role])
     db.flush()
-    db.add(Customer(name="Cliente Predeterminado", document_number="0000000000", phone="N/A", email="N/A", address="N/A"))
+    db.add(Customer(name="Cliente final", document_number="0000000000", phone="N/A", email="N/A", address="N/A"))
     db.add(
         User(
             full_name="Test Admin",

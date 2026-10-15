@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
@@ -13,6 +13,7 @@ class Inventory(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), unique=True, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     minimum_stock: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    notification_status: Mapped[str | None] = mapped_column(String(20))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     product: Mapped["Product"] = relationship(back_populates="inventory")

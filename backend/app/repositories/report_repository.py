@@ -27,5 +27,5 @@ class ReportRepository:
         return int(result[0]), Decimal(result[1]), Decimal(result[2]), Decimal(result[3]), Decimal(result[4])
 
     def inventory(self) -> list[Inventory]:
-        statement = select(Inventory).options(joinedload(Inventory.product).joinedload(Product.category)).order_by(Inventory.quantity)
+        statement = select(Inventory).join(Inventory.product).where(Product.article_type == "PRODUCT").options(joinedload(Inventory.product).joinedload(Product.category)).order_by(Inventory.quantity)
         return list(self.db.scalars(statement).unique().all())

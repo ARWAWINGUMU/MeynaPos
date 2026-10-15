@@ -14,7 +14,7 @@ class SaleItemCreate(BaseModel):
 
 class PaymentCreate(BaseModel):
     method: PaymentMethod
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(ge=0)
     reference: str | None = None
 
 

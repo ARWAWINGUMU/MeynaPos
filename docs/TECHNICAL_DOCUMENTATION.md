@@ -1,5 +1,15 @@
 # Documentación Técnica de MeynaPOS
 
+## Current Functional Update (2026-10-15)
+
+The existing architectural overview below is retained. The authoritative supplement
+for inventory notifications, named open sales, Cliente final, service articles,
+adaptive printing and database/Render initialization is
+[FUNCTIONAL_UPDATES.md](FUNCTIONAL_UPDATES.md). It records objectives, requirements,
+business rules, components, models/migrations, endpoints, flows, test cases/results
+and known limitations for each feature. Executed and pending verification evidence
+is separated in the [TESTING.md matrix](TESTING.md#test-matrix).
+
 ## 1. Descripción general del sistema
 
 **MeynaPOS** es un sistema web de punto de venta e inventario orientado a pequeños y medianos negocios. El sistema integra autenticación con JWT, roles, gestión de productos, inventario, clientes, ventas, compras, usuarios, reportes, configuración del negocio, CAPTCHA con Cloudflare Turnstile y generación de recibos/facturas PDF desde el frontend.

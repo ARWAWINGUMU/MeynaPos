@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "test:print": "node --test tests/receipt.test.mjs",
+    "test:catalog": "node --test tests/catalog.test.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

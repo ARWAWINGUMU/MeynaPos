@@ -15,8 +15,25 @@ export interface Inventory {
   low_stock: boolean;
 }
 
+export type InventoryAlertStatus = "LOW_STOCK" | "OUT_OF_STOCK";
+
+export interface InventoryAlert {
+  id: number;
+  product_id: number;
+  product_name: string;
+  quantity: number;
+  minimum_stock: number;
+  status: InventoryAlertStatus;
+  active: boolean;
+  read: boolean;
+  detected_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+}
+
 export interface Product {
   id: number;
+  article_type?: "PRODUCT" | "SERVICE";
   name: string;
   description?: string | null;
   barcode?: string | null;

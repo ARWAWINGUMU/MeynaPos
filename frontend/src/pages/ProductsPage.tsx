@@ -11,15 +11,17 @@ import { createProduct, deactivateProduct, findProductByBarcode, listProducts, p
 import type { Category, Product } from "../types/api";
 import { resolveMediaUrl } from "../utils/media";
 import { formatMoney, formatMoneyInput, parseMoneyInput } from "../utils/money";
+import { tracksInventory } from "../utils/catalog";
 
 const emptyForm: ProductFormPayload = {
+  article_type: "PRODUCT",
   name: "",
   description: "",
   sku: "",
   barcode: "",
   qr_code: "",
   price: "",
-  cost: "",
+  cost: "0",
   category_id: null,
   initial_stock: 0,
   minimum_stock: 5,
@@ -95,6 +97,7 @@ export function ProductsPage() {
   function openEdit(product: Product) {
     setEditing(product);
     setForm({
+      article_type: product.article_type ?? "PRODUCT",
       name: product.name,
       description: product.description ?? "",
       sku: product.sku,
@@ -119,12 +122,15 @@ export function ProductsPage() {
     try {
       const payload = {
         ...form,
+        initial_stock: form.article_type === "SERVICE" ? undefined : form.initial_stock,
+        minimum_stock: form.article_type === "SERVICE" ? undefined : form.minimum_stock,
         barcode: form.barcode || undefined,
         qr_code: form.qr_code || undefined,
         category_id: form.category_id || undefined,
       };
       const saved = editing
         ? await updateProduct(editing.id, {
+            article_type: payload.article_type,
             name: payload.name,
             description: payload.description,
             sku: payload.sku,
@@ -359,8 +365,8 @@ export function ProductsPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-2xl font-semibold text-[#1B8A5A]">{formatMoney(product.price, currency)}</span>
-                <span className={product.inventory?.low_stock ? "rounded-full bg-yellow-50 px-2 py-1 text-xs text-yellow-700" : "rounded-full bg-green-50 px-2 py-1 text-xs text-green-700"}>
-                  {product.inventory?.quantity ?? 0} unidades
+                <span className={tracksInventory(product) && product.inventory?.low_stock ? "rounded-full bg-yellow-50 px-2 py-1 text-xs text-yellow-700" : "rounded-full bg-green-50 px-2 py-1 text-xs text-green-700"}>
+                  {tracksInventory(product) ? `${product.inventory?.quantity ?? 0} unidades` : "No administra inventario"}
                 </span>
               </div>
               {role === "ADMIN" && (
@@ -381,6 +387,7 @@ export function ProductsPage() {
 
       <ReusableModal open={modalOpen} title={editing ? "Editar producto" : "Crear producto"} onClose={() => setModalOpen(false)}>
         <form onSubmit={(event) => { event.preventDefault(); saveProduct(); }} className="grid gap-4 md:grid-cols-2">
+          <label className="text-sm font-medium md:col-span-2">Tipo de articulo<select value={form.article_type ?? "PRODUCT"} onChange={(event) => setForm({ ...form, article_type: event.target.value === "SERVICE" ? "SERVICE" : "PRODUCT" })} className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2"><option value="PRODUCT">Producto</option><option value="SERVICE">Servicio</option></select></label>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="SKU" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} placeholder="Código de barras" className="rounded-lg border border-gray-300 px-3 py-2" />
@@ -395,8 +402,10 @@ export function ProductsPage() {
             <input value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Nueva categoría" className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2" />
             <button type="button" onClick={saveCategory} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Crear</button>
           </div>
+          {form.article_type !== "SERVICE" && <>
           <input type="number" value={form.initial_stock} onChange={(e) => setForm({ ...form, initial_stock: Number(e.target.value) })} placeholder="Stock" className="rounded-lg border border-gray-300 px-3 py-2" />
           <input type="number" value={form.minimum_stock} onChange={(e) => setForm({ ...form, minimum_stock: Number(e.target.value) })} placeholder="Stock mínimo" className="rounded-lg border border-gray-300 px-3 py-2" />
+          </>}
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-gray-600">
             <ImagePlus className="h-4 w-4" />
             <span>{imageFile?.name ?? "Seleccionar imagen"}</span>

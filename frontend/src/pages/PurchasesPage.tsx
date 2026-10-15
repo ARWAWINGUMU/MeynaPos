@@ -6,6 +6,7 @@ import { createPurchase, listPurchases, type PurchaseItemPayload } from "../serv
 import { listProducts } from "../services/productService";
 import type { Product } from "../types/api";
 import { formatMoney, formatMoneyInput, parseMoneyInput } from "../utils/money";
+import { tracksInventory } from "../utils/catalog";
 
 export function PurchasesPage() {
   const { currency } = useBusinessSettings();
@@ -16,7 +17,7 @@ export function PurchasesPage() {
   const [unitCostDraft, setUnitCostDraft] = useState("");
 
   async function load() {
-    setProducts(await listProducts());
+    setProducts((await listProducts()).filter(tracksInventory));
     setPurchases(await listPurchases());
   }
 

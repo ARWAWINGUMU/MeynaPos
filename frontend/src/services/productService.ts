@@ -2,6 +2,7 @@ import { api } from "./api";
 import type { Product, ProductRemovalResponse } from "../types/api";
 
 export interface ProductFormPayload {
+  article_type?: "PRODUCT" | "SERVICE";
   name: string;
   description?: string;
   barcode?: string;

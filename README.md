@@ -75,7 +75,7 @@ The backend follows Clean Architecture principles:
 Required design patterns are implemented:
 
 - **Singleton Pattern**: `DatabaseManager` in `backend/app/database/session.py` centralizes engine and session factory lifecycle.
-- **Factory Pattern**: `ProductFactory` in `backend/app/utils/product_factory.py` creates a complete Product aggregate with its Inventory record.
+- **Factory Pattern**: `ProductFactory` in `backend/app/utils/product_factory.py` creates unified catalog articles and adds an Inventory record only for physical products.
 
 ## Main Features
 
@@ -91,6 +91,11 @@ Required design patterns are implemented:
 - Categories show their product count and can only be deleted when no products are associated.
 - Barcode scanner workflow for keyboard-emulating scanners.
 - Inventory stock validation and low stock alerts.
+- Persistent inventory notification center with read/unread state, retention and exact product navigation.
+- Independently saved open sales with custom names, optimistic concurrency and idempotent checkout.
+- Unified physical-product and non-stock service catalog.
+- Generic customer renamed to Cliente final without replacing its ID.
+- Business-owned printer preferences with adaptive 58/80 mm, Letter and A4 receipts/PDFs.
 - Sales creation with automatic totals and stock decrement.
 - Daily sales and inventory reports.
 - React dashboard, POS sales interface, inventory, products, and reports pages.
@@ -275,6 +280,12 @@ alembic revision --autogenerate -m "describe change"
 ```
 
 ## Testing
+
+Feature specifications and deployment considerations are documented in
+[docs/FUNCTIONAL_UPDATES.md](docs/FUNCTIONAL_UPDATES.md). See
+[docs/TESTING.md](docs/TESTING.md) for the executed test matrix, commands and unverified
+physical-printer/Render checks. These reports distinguish local validation from CI
+and production verification.
 
 Run backend tests:
 

@@ -8,10 +8,13 @@ class SaleRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def add(self, sale: Sale) -> Sale:
+    def add(self, sale: Sale, *, commit: bool = True) -> Sale:
         self.db.add(sale)
-        self.db.commit()
-        self.db.refresh(sale)
+        if commit:
+            self.db.commit()
+            self.db.refresh(sale)
+        else:
+            self.db.flush()
         return sale
 
     def list(self) -> list[Sale]:

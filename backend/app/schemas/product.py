@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -12,13 +13,14 @@ class InventoryRead(BaseModel):
 
 
 class ProductBase(BaseModel):
+    article_type: Literal["PRODUCT", "SERVICE"] = "PRODUCT"
     name: str = Field(min_length=2, max_length=160)
     description: str | None = None
     barcode: str | None = Field(default=None, max_length=80, validation_alias=AliasChoices("barcode", "codigo_barras"))
     qr_code: str | None = Field(default=None, max_length=255, validation_alias=AliasChoices("qr_code", "codigo_qr"))
     sku: str = Field(min_length=2, max_length=80)
     price: Decimal = Field(gt=0)
-    cost: Decimal = Field(ge=0)
+    cost: Decimal = Field(default=Decimal("0.00"), ge=0)
     category_id: int | None = None
     supplier_id: int | None = None
     image_url: str | None = None
@@ -32,6 +34,7 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(BaseModel):
+    article_type: Literal["PRODUCT", "SERVICE"] | None = None
     name: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = None
     barcode: str | None = Field(default=None, max_length=80, validation_alias=AliasChoices("barcode", "codigo_barras"))

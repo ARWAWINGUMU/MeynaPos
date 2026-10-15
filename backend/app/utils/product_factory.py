@@ -11,6 +11,7 @@ class ProductFactory:
     @staticmethod
     def create_product(payload: ProductCreate) -> Product:
         product = Product(
+            article_type=payload.article_type,
             name=payload.name,
             description=payload.description,
             barcode=payload.barcode,
@@ -22,8 +23,6 @@ class ProductFactory:
             supplier_id=payload.supplier_id,
             image_url=payload.image_url,
         )
-        product.inventory = Inventory(
-            quantity=payload.initial_stock,
-            minimum_stock=payload.minimum_stock,
-        )
+        if payload.article_type == "PRODUCT":
+            product.inventory = Inventory(quantity=payload.initial_stock, minimum_stock=payload.minimum_stock)
         return product

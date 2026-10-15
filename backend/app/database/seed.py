@@ -46,7 +46,7 @@ def seed_initial_data(db: Session) -> None:
     default_customer = db.scalars(select(Customer).where(Customer.document_number == "0000000000")).first()
     if default_customer is None:
         default_customer = Customer(
-            name="Cliente Predeterminado",
+            name="Cliente final",
             document_number="0000000000",
             phone="N/A",
             email="N/A",

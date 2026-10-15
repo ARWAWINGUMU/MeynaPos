@@ -45,6 +45,8 @@ class SettingService:
     def update_settings(self, payload: BusinessSettingsUpdate) -> BusinessSettingsRead:
         setting = self.get_or_create_settings()
         data = payload.model_dump(exclude_unset=True)
+        if payload.print_preferences is not None:
+            data["print_preferences"] = payload.print_preferences.model_dump()
         if "business_name" in data and not str(data["business_name"] or "").strip():
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Business name is required")
         if "currency" in data:
