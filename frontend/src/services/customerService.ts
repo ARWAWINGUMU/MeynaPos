@@ -37,6 +37,7 @@ export interface CustomerSaleHistoryItem {
   discount: string;
   total: string;
   payment_method?: PaymentMethod | null;
+  payment_method_name?: string | null;
   status: string;
 }
 

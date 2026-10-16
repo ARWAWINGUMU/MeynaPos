@@ -19,6 +19,7 @@ export interface ReceiptData {
   customer: Customer;
   cashierName: string;
   paymentMethod: PaymentMethod;
+  paymentMethodName?: string | null;
   receivedAmount?: number;
   changeAmount?: number;
   subtotal: number;

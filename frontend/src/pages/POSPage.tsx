@@ -1,8 +1,5 @@
 import {
-  ArrowLeftRight,
-  Banknote,
   CheckCircle2,
-  CreditCard,
   Download,
   Eye,
   Minus,
@@ -13,13 +10,15 @@ import {
   ShoppingCart,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 
 import logoImg from "../assets/logo.png";
 import { BarcodeScannerInput } from "../components/BarcodeScannerInput";
 import { OpenSalesBar } from "../components/OpenSalesBar";
-import { tracksInventory } from "../utils/catalog";
+import { filterSalesProducts, tracksInventory, type SalesCategoryFilter } from "../utils/catalog";
+import { PaymentMethodSelector } from "../components/PaymentMethodSelector";
+import type { PaymentOption } from "../services/paymentOptionService";
 import { ReusableModal } from "../components/ReusableModal";
 import { useAuth } from "../context/AuthContext";
 import { createCategory, listCategories } from "../services/categoryService";
@@ -44,6 +43,8 @@ import { useReceiptPrinter } from "../hooks/useReceiptPrinter";
 
 interface PaymentDraft {
   method: PaymentMethod;
+  methodId: number;
+  methodName: string;
   receivedAmount: number;
   changeAmount: number;
 }
@@ -88,7 +89,9 @@ export function POSPage() {
   const [reviewSaleOpen, setReviewSaleOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [search, setSearch] = useState("");
-  const [stockFilter, setStockFilter] = useState<"ALL" | "AVAILABLE" | "LOW" | "OUT">("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<SalesCategoryFilter>("ALL");
+  const [selectedPayment, setSelectedPayment] = useState<PaymentOption | null>(null);
+  const productRequest = useRef(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [cashReceived, setCashReceived] = useState("");
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
@@ -110,7 +113,9 @@ export function POSPage() {
   const receiptPrinter = useReceiptPrinter();
 
   const loadProducts = useCallback(async () => {
-    setProducts(await listProducts(search));
+    const request = ++productRequest.current;
+    const records = await listProducts(search);
+    if (productRequest.current === request) setProducts(records);
   }, [search]);
 
   const loadCustomers = useCallback(async () => {
@@ -129,8 +134,20 @@ export function POSPage() {
   }, [loadCustomers, workspace.active?.id]);
 
   useEffect(() => {
-    listCategories().then(setCategories).catch(() => undefined);
+    const refresh = () => { void listCategories().then(setCategories).catch(() => setMessage("No fue posible actualizar las categorias.")); };
+    refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("meynapos:catalog-changed", refresh);
+    return () => { window.removeEventListener("focus", refresh); window.removeEventListener("meynapos:catalog-changed", refresh); };
   }, []);
+  useEffect(() => {
+    const refresh = () => { void loadProducts().catch(() => setMessage("No fue posible actualizar el catalogo.")); };
+    window.addEventListener("meynapos:catalog-changed", refresh);
+    return () => window.removeEventListener("meynapos:catalog-changed", refresh);
+  }, [loadProducts]);
+  useEffect(() => {
+    if (typeof categoryFilter === "number" && !categories.some((category) => category.id === categoryFilter && category.is_active)) setCategoryFilter("ALL");
+  }, [categories, categoryFilter]);
 
   useEffect(() => {
     getSettings()
@@ -151,22 +168,7 @@ export function POSPage() {
     );
   }, [customerSearch, customers]);
 
-  const visibleProducts = useMemo(() => {
-    return products.filter((product) => {
-      if (!tracksInventory(product)) return stockFilter === "ALL" || stockFilter === "AVAILABLE";
-      const stock = product.inventory?.quantity ?? 0;
-      if (stockFilter === "AVAILABLE") {
-        return stock > 0;
-      }
-      if (stockFilter === "LOW") {
-        return Boolean(product.inventory?.low_stock) && stock > 0;
-      }
-      if (stockFilter === "OUT") {
-        return stock <= 0;
-      }
-      return true;
-    });
-  }, [products, stockFilter]);
+  const visibleProducts = useMemo(() => filterSalesProducts(products, search, categoryFilter), [products, search, categoryFilter]);
 
   const subtotal = useMemo(
     () => cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0),
@@ -251,7 +253,7 @@ export function POSPage() {
     );
   }
 
-  function validateSale(): boolean {
+  function validateSale(validateDiscount = true): boolean {
     if (cart.length === 0) {
       setMessage("Agrega productos antes de registrar la venta.");
       return false;
@@ -264,11 +266,11 @@ export function POSPage() {
       setMessage("La configuración del negocio todavía no está disponible.");
       return false;
     }
-    if (discountType === "FIXED" && (discountNumericValue <= 0 || discountNumericValue > totalBeforeDiscount)) {
+    if (validateDiscount && discountType === "FIXED" && (discountNumericValue <= 0 || discountNumericValue > totalBeforeDiscount)) {
       setMessage("El descuento fijo debe ser mayor que 0 y no superar el subtotal más impuestos.");
       return false;
     }
-    if (discountType === "PERCENTAGE" && (discountNumericValue <= 0 || discountNumericValue > 100)) {
+    if (validateDiscount && discountType === "PERCENTAGE" && (discountNumericValue <= 0 || discountNumericValue > 100)) {
       setMessage("El descuento porcentual debe ser mayor que 0 y menor o igual a 100.");
       return false;
     }
@@ -278,7 +280,7 @@ export function POSPage() {
   async function startCheckout() {
     const targetSaleId = workspace.active?.id;
     setMessage(null);
-    if (!validateSale()) {
+    if (!validateSale(false)) {
       return;
     }
     try {
@@ -287,13 +289,15 @@ export function POSPage() {
       setBusinessSettings(currentSettings);
       const checked = await workspace.validate();
       if (!workspace.isActive(targetSaleId)) return;
-      if (checked.issues.length) { setReviewSaleOpen(true); return; }
+      if (checked.issues.some((issue) => issue.code !== "INVALID_DISCOUNT")) { setReviewSaleOpen(true); return; }
+        setSelectedPayment(null);
       setCashReceived("");
       setPaymentModalOpen(true);
     } catch { /* The workspace displays persistence errors. */ }
   }
 
   function confirmPayment() {
+    if (!selectedPayment) { setMessage("Selecciona un medio de pago disponible."); return; }
     if (!validateSale()) {
       return;
     }
@@ -303,6 +307,8 @@ export function POSPage() {
     }
     setPaymentDraft({
       method: paymentMethod,
+      methodId: selectedPayment.id,
+      methodName: selectedPayment.name,
       receivedAmount: paymentMethod === "CASH" ? cashAmount : total,
       changeAmount: paymentMethod === "CASH" ? cashChange : 0,
     });
@@ -321,6 +327,7 @@ export function POSPage() {
     try {
       const saleResponse = await workspace.complete({
           method: paymentDraft.method,
+          method_id: paymentDraft.methodId,
           amount: paymentDraft.receivedAmount.toFixed(2),
       });
       const receiptData: ReceiptData = {
@@ -333,6 +340,7 @@ export function POSPage() {
         customer: selectedCustomer,
         cashierName: fullName ?? "Cajero",
         paymentMethod: saleResponse.payment.method,
+        paymentMethodName: saleResponse.payment.method_name,
         receivedAmount: Number(saleResponse.payment.amount),
         changeAmount: Math.max(0, Number(saleResponse.payment.amount) - Number(saleResponse.total)),
         subtotal: Number(saleResponse.subtotal),
@@ -437,7 +445,7 @@ export function POSPage() {
   }
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
     <OpenSalesBar workspace={workspace} onCancel={() => setCancelSaleOpen(true)} onReload={() => setReloadSalesOpen(true)} />
     <fieldset disabled={workspace.loading || workspace.busy || loadingSale} className="min-w-0">
     <section className="flex min-h-[calc(100vh-12rem)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white lg:flex-row">
@@ -448,18 +456,18 @@ export function POSPage() {
               <h2 className="text-2xl font-semibold text-gray-900">Ventas</h2>
               <p className="text-sm text-gray-500">Busca, escanea y factura productos desde una sola pantalla.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div role="group" aria-label="Categorias de productos" className="flex min-w-0 max-w-full gap-2 overflow-x-auto pb-1">
               {[
-                { value: "ALL", label: "Todos" },
-                { value: "AVAILABLE", label: "Disponibles" },
-                { value: "LOW", label: "Bajo stock" },
-                { value: "OUT", label: "Sin stock" },
+                { value: "ALL" as const, label: "Todos" },
+                ...categories.filter((category) => category.is_active).map((category) => ({ value: category.id, label: category.name })),
+                { value: "UNCATEGORIZED" as const, label: "Sin categoria" },
               ].map((option) => (
                 <button
                   key={option.value}
-                  onClick={() => setStockFilter(option.value as typeof stockFilter)}
-                  className={`rounded-lg px-4 py-2 text-sm transition-colors ${
-                    stockFilter === option.value ? "bg-[#1B8A5A] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  aria-pressed={categoryFilter === option.value}
+                  onClick={() => setCategoryFilter(option.value)}
+                  className={`min-h-11 shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-colors ${
+                    categoryFilter === option.value ? "bg-[#1B8A5A] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                 >
                   {option.label}
@@ -642,28 +650,6 @@ export function POSPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { value: "CASH", label: "Efectivo", icon: Banknote },
-              { value: "CARD", label: "Tarjeta", icon: CreditCard },
-              { value: "TRANSFER", label: "Transfer.", icon: ArrowLeftRight },
-            ].map((method) => {
-              const Icon = method.icon;
-              return (
-                <button
-                  key={method.value}
-                  onClick={() => setPaymentMethod(method.value as PaymentMethod)}
-                  className={`rounded-lg border p-3 text-xs font-medium transition ${
-                    paymentMethod === method.value ? "border-[#1B8A5A] bg-emerald-50 text-[#1B8A5A]" : "border-gray-200 text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  <Icon className="mx-auto mb-1 h-5 w-5" />
-                  {method.label}
-                </button>
-              );
-            })}
-          </div>
-
           <button onClick={startCheckout} className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46]">
             Procesar Pago
           </button>
@@ -675,7 +661,9 @@ export function POSPage() {
 
       <ReusableModal open={paymentModalOpen} title="Procesar pago" onClose={() => setPaymentModalOpen(false)}>
         {workspace.error && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{workspace.error}</p>}
+        {message && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{message}</p>}
         <div className="space-y-5">
+          <PaymentMethodSelector selected={selectedPayment} onSelect={(option) => { setSelectedPayment(option); setPaymentMethod(option.kind); }} />
           <div className="rounded-lg bg-emerald-50 p-4 text-center">
             <p className="text-sm text-gray-500">Total final a pagar</p>
             <p className="text-4xl font-bold text-[#1B8A5A]">{formatMoney(total, currencyCode)}</p>
@@ -735,7 +723,7 @@ export function POSPage() {
           )}
           <button
             onClick={confirmPayment}
-            disabled={paymentMethod === "CASH" && cashAmount < total}
+            disabled={!selectedPayment || (paymentMethod === "CASH" && cashAmount < total)}
             className="w-full rounded-lg bg-[#1B8A5A] px-4 py-3 font-semibold text-white hover:bg-[#156b46] disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             Confirmar Pago
@@ -749,7 +737,7 @@ export function POSPage() {
           <p className="text-sm text-gray-600">Revisa los datos antes de registrar la venta.</p>
           <div className="rounded-lg border border-gray-200 p-4 text-sm">
             <div className="flex justify-between"><span>Cliente</span><strong>{selectedCustomer?.name}</strong></div>
-            <div className="flex justify-between"><span>Método</span><strong>{paymentDraft?.method === "CASH" ? "Efectivo" : paymentDraft?.method === "CARD" ? "Tarjeta" : "Transferencia"}</strong></div>
+            <div className="flex justify-between gap-3"><span>Método</span><strong className="break-words text-right">{paymentDraft?.methodName}</strong></div>
             <div className="flex justify-between"><span>Impuesto aplicado</span><strong>{taxPercentage.toFixed(2)}%</strong></div>
             <div className="flex justify-between"><span>Descuento</span><strong>-{formatMoney(discountAmount, currencyCode)}</strong></div>
             <div className="flex justify-between"><span>Total final</span><strong>{formatMoney(total, currencyCode)}</strong></div>
@@ -845,7 +833,7 @@ export function POSPage() {
                     <td className="px-3 py-3 font-medium">{sale.sale_number}</td>
                     <td className="px-3 py-3">{new Date(sale.date).toLocaleString()}</td>
                     <td className="px-3 py-3">{sale.products.map((product) => product.name).join(", ")}</td>
-                    <td className="px-3 py-3">{sale.payment_method === "CASH" ? "Efectivo" : sale.payment_method === "CARD" ? "Tarjeta" : "Transferencia"}</td>
+                    <td className="px-3 py-3">{sale.payment_method_name ?? (sale.payment_method === "CASH" ? "Efectivo" : sale.payment_method === "CARD" ? "Tarjeta" : "Transferencia")}</td>
                     <td className="px-3 py-3 font-semibold text-[#1B8A5A]">{formatMoney(sale.total, currencyCode)}</td>
                   </tr>
                 ))}

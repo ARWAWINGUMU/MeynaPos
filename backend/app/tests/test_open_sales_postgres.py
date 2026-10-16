@@ -83,6 +83,27 @@ def test_parallel_creation_assigns_unique_default_numbers(postgres_workspace) ->
     assert all(name == f"Venta {number}" for number, name in results)
 
 
+def test_parallel_rename_reserves_one_normalized_label(postgres_workspace) -> None:
+    factory, ids = postgres_workspace
+    first = create_held(factory, ids)
+    second = create_held(factory, ids)
+    barrier = Barrier(2)
+
+    def rename(saved) -> int:
+        with factory() as db:
+            user = db.get(User, ids[0])
+            barrier.wait(timeout=15)
+            try:
+                OpenSaleService(db).rename(saved.id, "Mesa 4", saved.version, user)
+                return 200
+            except HTTPException as error:
+                return error.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(rename, [first, second]))
+    assert sorted(results) == [200, 409]
+
+
 def checkout(factory: sessionmaker[Session], ids: tuple[int, int], saved, barrier: Barrier):
     with factory() as db:
         user = db.get(User, ids[0])

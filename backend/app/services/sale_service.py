@@ -15,6 +15,7 @@ from app.repositories.sale_repository import SaleRepository
 from app.schemas.sale import SaleCreate
 from app.services.inventory_alert_service import InventoryAlertService
 from app.services.setting_service import SettingService
+from app.services.payment_option_service import PaymentOptionService
 
 
 class SaleService:
@@ -32,6 +33,7 @@ class SaleService:
 
     def _create_sale(self, payload: SaleCreate, cashier_id: int, *, commit: bool) -> Sale:
         settings = SettingService(self.db).get_or_create_settings()
+        payment_method, payment_method_id, payment_method_name = PaymentOptionService(self.db).resolve(payload.payment)
         subtotal = Decimal("0.00")
         details: list[SaleDetail] = []
         impacted_products = []
@@ -98,7 +100,9 @@ class SaleService:
             total=total,
             details=details,
             payment=Payment(
-                method=payload.payment.method,
+                method=payment_method,
+                method_id=payment_method_id,
+                method_name=payment_method_name,
                 amount=payload.payment.amount,
                 reference=payload.payment.reference,
             ),

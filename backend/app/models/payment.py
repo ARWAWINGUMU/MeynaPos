@@ -21,6 +21,8 @@ class Payment(Base):
     method: Mapped[PaymentMethod] = mapped_column(Enum(PaymentMethod), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     reference: Mapped[str | None] = mapped_column(String(120))
+    method_id: Mapped[int | None] = mapped_column(ForeignKey("payment_options.id"))
+    method_name: Mapped[str | None] = mapped_column(String(80))
 
     sale: Mapped["Sale"] = relationship(back_populates="payment")
 

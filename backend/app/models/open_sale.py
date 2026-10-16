@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
@@ -21,11 +21,15 @@ class OpenSale(Base):
         CheckConstraint("version >= 1", name="ck_open_sale_version"),
         CheckConstraint("status IN ('DRAFT', 'HELD', 'COMPLETED', 'CANCELLED')", name="ck_open_sale_status"),
         CheckConstraint("status <> 'COMPLETED' OR sale_id IS NOT NULL", name="ck_open_sale_completed"),
+        Index("uq_open_sale_active_name", "business_id", "name_key", unique=True,
+              postgresql_where=text("status IN ('DRAFT', 'HELD')"), sqlite_where=text("status IN ('DRAFT', 'HELD')")),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     number: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(80), nullable=False)
+    name_key: Mapped[str] = mapped_column(String(240), nullable=False)
+    business_id: Mapped[int] = mapped_column(ForeignKey("business_settings.id"), nullable=False, index=True)
     cashier_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"))
     status: Mapped[str] = mapped_column(String(16), default=OpenSaleStatus.DRAFT, nullable=False, index=True)

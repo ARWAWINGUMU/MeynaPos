@@ -5,6 +5,7 @@ from app.models.inventory import Inventory
 from app.models.inventory_alert import InventoryAlert, InventoryAlertStatus
 from app.models.open_sale import OpenSale, OpenSaleLine, OpenSaleStatus
 from app.models.payment import Payment, PaymentMethod
+from app.models.payment_option import PaymentOption
 from app.models.product import Product
 from app.models.purchase import Purchase
 from app.models.purchase_detail import PurchaseDetail

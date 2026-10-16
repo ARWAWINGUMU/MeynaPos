@@ -61,13 +61,13 @@ def test_hold_persists_without_financial_or_inventory_effects(client: TestClient
     assert report["total"] == 0 and report["items"] == []
 
 
-def test_open_sale_names_persist_and_allow_duplicates(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_open_sale_names_persist_and_reject_normalized_duplicates(client: TestClient, auth_headers: dict[str, str]) -> None:
     item = product(client, auth_headers)
     first = draft(client, auth_headers, item)
     second = draft(client, auth_headers, item)
     assert first["number"] != second["number"]
     assert first["name"] == f"Venta {first['number']}"
-    for saved in (first, second):
+    for saved in (first,):
         url = f"/api/open-sales/{saved['id']}/name"
         assert client.patch(url, headers=auth_headers, json={"version": saved["version"], "name": "   "}).status_code == 422
         renamed = client.patch(url, headers=auth_headers, json={"version": saved["version"], "name": " Mesa 4 "})
@@ -75,6 +75,26 @@ def test_open_sale_names_persist_and_allow_duplicates(client: TestClient, auth_h
         assert renamed.json()["name"] == "Mesa 4"
         assert client.get(f"/api/open-sales/{saved['id']}", headers=auth_headers).json()["name"] == "Mesa 4"
         assert client.patch(url, headers=auth_headers, json={"version": saved["version"], "name": "Stale"}).status_code == 409
+    duplicate = client.patch(f"/api/open-sales/{second['id']}/name", headers=auth_headers,
+        json={"version": second["version"], "name": " mesa   4 "})
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "NAME_CONFLICT"
+    reused = draft(client, auth_headers, item)
+    assert reused["name"] == "Venta 1"
+    assert reused["number"] != first["number"] and reused["id"] != first["id"]
+
+
+def test_cancelled_and_completed_names_are_reusable(client: TestClient, auth_headers: dict[str, str]) -> None:
+    item = product(client, auth_headers, stock=20)
+    first = draft(client, auth_headers, item, quantity=1)
+    assert complete(client, auth_headers, first).status_code == 200
+    second = draft(client, auth_headers, item, quantity=1)
+    assert second["name"] == "Venta 1"
+    assert client.post(f"/api/open-sales/{second['id']}/cancel", headers=auth_headers,
+        json={"version": second["version"]}).status_code == 200
+    third = draft(client, auth_headers, item, quantity=1)
+    assert third["name"] == "Venta 1"
+    assert len({first["number"], second["number"], third["number"]}) == 3
 
 
 def test_multiple_open_sales_remain_independent_after_reload(client: TestClient, auth_headers: dict[str, str], db_session: Session) -> None:

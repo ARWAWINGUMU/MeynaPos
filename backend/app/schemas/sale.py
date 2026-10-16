@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.payment import PaymentMethod
 from app.models.sale import DiscountType
@@ -13,9 +13,16 @@ class SaleItemCreate(BaseModel):
 
 
 class PaymentCreate(BaseModel):
-    method: PaymentMethod
+    method: PaymentMethod | None = None
+    method_id: int | None = Field(default=None, gt=0)
     amount: Decimal = Field(ge=0)
     reference: str | None = None
+
+    @model_validator(mode="after")
+    def require_method(self) -> "PaymentCreate":
+        if self.method is None and self.method_id is None:
+            raise ValueError("Select a payment method")
+        return self
 
 
 class SaleCreate(BaseModel):
@@ -57,6 +64,8 @@ class SaleDetailRead(BaseModel):
 
 class PaymentRead(BaseModel):
     method: PaymentMethod
+    method_id: int | None = None
+    method_name: str | None = None
     amount: Decimal
     reference: str | None
 

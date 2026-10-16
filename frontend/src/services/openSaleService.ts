@@ -41,6 +41,7 @@ export function openSaleError(error: unknown): string {
     const detail = error.response?.data.detail;
     if (typeof detail === "object" && detail?.code === "VERSION_CONFLICT") return "Esta venta cambió en otra ventana. Recarga la venta guardada antes de continuar.";
     if (typeof detail === "object" && detail?.code === "SALE_CLOSED") return "Esta venta ya fue cobrada o cancelada. Recarga las ventas abiertas.";
+    if (typeof detail === "object" && detail?.code === "NAME_CONFLICT") return "Otra venta abierta ya usa ese nombre. Elige uno diferente.";
     if (typeof detail === "object" && ["OPEN_SALE_CHANGED", "PRICE_CHANGED"].includes(detail?.code ?? "")) return "Cambió el precio, impuesto o stock. Revisa la venta antes de cobrar.";
     if (typeof detail === "string") {
       const messages: Record<string, string> = {

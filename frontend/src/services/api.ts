@@ -16,6 +16,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => {
     const method = response.config.method?.toLowerCase();
+    if (method && ["post", "put", "patch", "delete"].includes(method) && /^\/?(products|categories)(\/|$)/.test(response.config.url ?? "")) {
+      window.dispatchEvent(new Event("meynapos:catalog-changed"));
+    }
     if (method && ["post", "put", "patch", "delete"].includes(method)
       && (/^\/?(sales|products|inventory|purchases)(\/|$)/.test(response.config.url ?? "")
         || /^\/?open-sales\/[^/]+\/complete$/.test(response.config.url ?? ""))) {

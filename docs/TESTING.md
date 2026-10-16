@@ -1,5 +1,44 @@
 # Functional Improvements and Verification
 
+## Responsive Sales Feature Validation (2026-10-16)
+
+This section supersedes the historical duplicate-label behavior in SALE-02 below.
+See [RESPONSIVE_SALES.md](RESPONSIVE_SALES.md) for requirements, flows, endpoints,
+migration preconditions and limitations. No production deployment was performed.
+
+Commands used with existing dependency images, without changing dependencies:
+
+- N1: `docker exec meynapos-sales-backend-qa sh -c 'OPEN_SALES_POSTGRES_URL="$DATABASE_URL" pytest -q --tb=short'`
+- N2: `docker exec -w /app meynapos-functional-validation npm run test:catalog`
+- N3: `docker exec -w /app meynapos-functional-validation npm run test:print`
+- N4: `docker exec -w /app meynapos-functional-validation npm run build`
+- N5: Chrome headless, `--window-size=1440,1100 --virtual-time-budget=20000 --dump-dom http://localhost:5188/tests/navigation.browser.html`; mobile/tablet use `?width=390` / `?width=768` isolated iframe CSS viewports.
+- N6: Chrome headless, `--virtual-time-budget=30000 --dump-dom http://localhost:5188/tests/openSales.browser.html`.
+- N7: `docker compose config --quiet`; `git diff --check`.
+
+| ID | Module | Type | Scenario | Expected | Obtained | Status | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| NAV-01 | Shared layout | Browser integration | Desktop sidebar and preference | Initially visible; hiding releases width and saves preference | PASS at 1424 CSS px | PASS | N5, navigation.browser.tsx |
+| NAV-02 | Shared layout | Browser integration | Mobile with visible desktop preference | Initially closed; overlay, Escape/focus restoration, backdrop and navigation close | PASS at 390 CSS px, including backdrop assertion | PASS | N5, ?width=390 |
+| NAV-03 | Shared layout | Browser integration | Tablet | Closed initial drawer, focus/navigation, no horizontal overflow | PASS at 768 CSS px | PASS | N5, ?width=768 |
+| NAV-04 | Sale menu | Browser integration | Menu inside overflow container | Portal anchored within viewport; rename action works | PASS desktop/mobile/tablet | PASS | N5 |
+| PAY-01 | Payments | Browser integration | QR and administrator custom option | Select QR; create and immediately select custom method | PASS desktop/mobile/tablet using fake API | PASS | N5 |
+| PAY-02 | Receipts | PDF unit | Custom payment snapshot and historical fallback | Print custom name; preserve legacy Cash label | 15 receipt cases passed | PASS | N3, receipt.test.mjs |
+| CAT-06 | Sales catalog | Frontend unit | Category + search, uncategorized, service/depleted stock | Correct intersection; inventory restrictions remain separate | 4 catalog cases passed | PASS | N2, catalog.test.mjs |
+| SALE-14 | Multisale | Browser integration | Autosave, reload, rapid edits, network/version conflicts, retries | Independent data; no duplicate charge/create | Harness PASS | PASS | N6, fake API and real useOpenSales |
+| QA-03 | Frontend | Build | TypeScript and Vite | Successful production compilation | Successful; nonblocking large-chunk warning | PASS | N4 |
+| QA-04 | Backend | Full regression | API, normalized/reusable labels, payment permissions/scope, concurrency, migrations | All cases pass sequentially | 111 passed, 0 skipped, 295.52 seconds; existing warnings remain | PASS | N1 |
+| OPS-03 | Repository | Configuration | Compose and whitespace checks | Valid configuration; no whitespace errors | Passed, existing LF/CRLF notices | PASS | N7 |
+| OPS-04 | Deployment | Production | Feature deployment to Render | Not part of this feature-branch task | Not executed intentionally | NOT RUN | PR review required |
+| NAV-05 | Compatibility | Physical/browser matrix | Safari/Firefox, real touch devices | Compatible navigation | Not executed | NOT RUN | Chrome QA is not cross-browser/device proof |
+
+An initial full backend attempt overlapped another pytest process using the same
+SQLite fixture filename, causing missing-table/fixture failures. Those results
+are invalid regression evidence; the final run is sequential. PostgreSQL checks
+use isolated random schemas, never reset business data or PostgreSQL volumes.
+Fresh and populated migrations were also executed independently: both passed.
+No package installation, dependency update or production credentials were needed.
+
 ## Scope
 
 These changes extend the existing implementation; earlier printing, notification

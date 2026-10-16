@@ -114,6 +114,7 @@ class CustomerService:
                 discount=sale.discount_amount,
                 total=sale.total,
                 payment_method=sale.payment.method if sale.payment else None,
+                payment_method_name=sale.payment.method_name if sale.payment else None,
                 status="PAGADA",
             )
             for sale in sales

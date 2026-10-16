@@ -52,4 +52,5 @@ class CustomerSaleHistoryItem(BaseModel):
     discount: Decimal
     total: Decimal
     payment_method: PaymentMethod | None
+    payment_method_name: str | None = None
     status: str

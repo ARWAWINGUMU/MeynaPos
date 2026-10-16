@@ -145,6 +145,7 @@ export function CustomersPage() {
       customer: selectedCustomer,
       cashierName: sale.cashier || fullName || "Cajero",
       paymentMethod: method,
+      paymentMethodName: sale.payment_method_name,
       subtotal: Number(sale.subtotal),
       tax: Number(sale.tax),
       discount: Number(sale.discount),
@@ -267,7 +268,7 @@ export function CustomersPage() {
                     <td className="px-3 py-3 font-medium">{sale.sale_number}</td>
                     <td className="px-3 py-3">{formatDate(sale.date)}</td>
                     <td className="px-3 py-3 font-semibold text-[#047857]">{formatMoney(sale.total, currency)}</td>
-                    <td className="px-3 py-3">{paymentLabel(sale.payment_method)}</td>
+                    <td className="px-3 py-3">{sale.payment_method_name ?? paymentLabel(sale.payment_method)}</td>
                     <td className="px-3 py-3">
                       <div className="flex gap-2">
                         <button onClick={() => { setSelectedSale(sale); setSaleOpen(true); }} className="rounded-lg border border-gray-200 p-2 hover:bg-gray-50" aria-label="Detalle"><Eye className="h-4 w-4" /></button>
@@ -290,7 +291,7 @@ export function CustomersPage() {
             <div className="grid gap-3 rounded-lg bg-gray-50 p-4 md:grid-cols-2">
               <div><span className="text-gray-500">Fecha</span><p className="font-semibold">{formatDate(selectedSale.date)}</p></div>
               <div><span className="text-gray-500">Cajero</span><p className="font-semibold">{selectedSale.cashier}</p></div>
-              <div><span className="text-gray-500">Pago</span><p className="font-semibold">{paymentLabel(selectedSale.payment_method)}</p></div>
+              <div><span className="text-gray-500">Pago</span><p className="font-semibold">{selectedSale.payment_method_name ?? paymentLabel(selectedSale.payment_method)}</p></div>
               <div><span className="text-gray-500">Estado</span><p className="font-semibold text-emerald-700">{selectedSale.status}</p></div>
             </div>
             <div className="rounded-lg border border-gray-200">

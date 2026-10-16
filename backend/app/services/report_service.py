@@ -2,10 +2,10 @@ from collections import OrderedDict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import joinedload
 
-from app.models.payment import Payment
+from app.models.payment import Payment, PaymentMethod
 from app.models.sale import Sale
 from app.models.sale_detail import SaleDetail
 from app.repositories.report_repository import ReportRepository
@@ -62,6 +62,7 @@ class ReportService:
                     discount=sale.discount_amount,
                     total=sale.total,
                     payment_method=sale.payment.method.value if sale.payment else "N/A",
+                    payment_method_name=sale.payment.method_name if sale.payment else None,
                     status="PAGADA",
                 )
                 for sale in sales
@@ -105,13 +106,15 @@ class ReportService:
         ]
 
     def sales_by_payment_method(self) -> list[PaymentMethodReportItem]:
+        display_name = func.coalesce(Payment.method_name, case({PaymentMethod.CASH: "Efectivo",
+            PaymentMethod.CARD: "Tarjeta", PaymentMethod.TRANSFER: "Transferencia"}, value=Payment.method))
         statement = (
-            select(Payment.method, func.count(Payment.id), func.coalesce(func.sum(Sale.total), 0))
+            select(Payment.method, display_name, func.count(Payment.id), func.coalesce(func.sum(Sale.total), 0))
             .join(Sale, Sale.id == Payment.sale_id)
-            .group_by(Payment.method)
+            .group_by(Payment.method, display_name)
         )
         return [
-            PaymentMethodReportItem(method=row[0].value, transactions=int(row[1]), total=Decimal(row[2]))
+            PaymentMethodReportItem(method=row[0].value, method_name=row[1], transactions=int(row[2]), total=Decimal(row[3]))
             for row in self.reports.db.execute(statement).all()
         ]
 

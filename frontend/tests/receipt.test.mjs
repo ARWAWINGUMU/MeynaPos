@@ -30,6 +30,13 @@ function receipt(count = 1) {
 }
 const preferences = (format) => normalizePrintPreferences({ format, margin: PAPER_FORMATS[format].margin, showLogo: false });
 
+test("Custom payment snapshots are printed and legacy receipts retain their fallback", async () => {
+  const custom = await createReceiptPdf({ ...receipt(), paymentMethod: "TRANSFER", paymentMethodName: "Local voucher" }, preferences("LETTER"));
+  assert.ok(custom.output().includes("Local voucher"));
+  const legacy = await createReceiptPdf(receipt(), preferences("LETTER"));
+  assert.ok(legacy.output().includes("Efectivo"));
+});
+
 for (const format of Object.keys(PAPER_FORMATS)) {
   for (const count of [1, 150]) {
     test(`${format}: ${count} products, long names, large amounts, taxes, discount and history`, async () => {

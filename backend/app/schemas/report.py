@@ -23,6 +23,7 @@ class SalesReportItem(BaseModel):
     discount: Decimal
     total: Decimal
     payment_method: str
+    payment_method_name: str | None = None
     status: str
 
 
@@ -55,6 +56,7 @@ class TopProductReportItem(BaseModel):
 
 class PaymentMethodReportItem(BaseModel):
     method: str
+    method_name: str | None = None
     transactions: int
     total: Decimal
 

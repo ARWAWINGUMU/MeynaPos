@@ -9,6 +9,8 @@ import type { Product, SaleResponse } from "../src/types/api";
 import type { OpenSale } from "../src/types/openSale";
 import { OpenSalesBar } from "../src/components/OpenSalesBar";
 import { POSPage } from "../src/pages/POSPage";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MainLayout } from "../src/layouts/MainLayout";
 import "../src/styles.css";
 
 const server = new Map<string, OpenSale>();
@@ -31,6 +33,13 @@ api.defaults.adapter = async (config) => {
   const parts = (config.url ?? "").split("/").filter(Boolean);
   if (parts[0] === "products") return respond(products);
   if (parts[0] === "categories") return respond([]);
+  if (parts[0] === "notifications") return respond([]);
+  if (parts[0] === "payment-methods") return respond([
+    { id: 1, business_id: 1, code: "CASH", name: "Efectivo", kind: "CASH", is_active: true },
+    { id: 2, business_id: 1, code: "CARD", name: "Tarjeta", kind: "CARD", is_active: true },
+    { id: 3, business_id: 1, code: "TRANSFER", name: "Transferencia", kind: "TRANSFER", is_active: true },
+    { id: 4, business_id: 1, code: "QR_BREB", name: "QR Bre-B", kind: "TRANSFER", is_active: true },
+  ]);
   if (parts[0] === "customers") {
     const customers = [1, 2].map((id) => ({ id, name: `Customer ${id}`, document_number: String(id) }));
     return respond(parts[1] === "default" ? customers[0] : customers);
@@ -119,7 +128,9 @@ async function run() {
   assert(element, "Missing root");
   let root = createRoot(element);
   if (new URLSearchParams(window.location.search).has("preview")) {
-    root.render(<AuthProvider><POSPage /></AuthProvider>);
+    root.render(<AuthProvider><MemoryRouter><Routes><Route element={<MainLayout />}>
+      <Route path="*" element={<POSPage />} />
+    </Route></Routes></MemoryRouter></AuthProvider>);
     document.body.dataset.testStatus = "preview";
     return;
   }

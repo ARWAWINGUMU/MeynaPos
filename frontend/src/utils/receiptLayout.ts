@@ -65,7 +65,7 @@ export function createReceiptLayout(data: ReceiptData, preferences: PrintPrefere
     if (optional(data.customer.document_number)) text(`Documento: ${data.customer.document_number}`);
   }
   const paymentLabels = { CASH: "Efectivo", CARD: "Tarjeta", TRANSFER: "Transferencia" };
-  text(`Método de pago: ${paymentLabels[data.paymentMethod]}`);
+  text(`Método de pago: ${data.paymentMethodName ?? paymentLabels[data.paymentMethod]}`);
   const columns = [width * 0.44, width * 0.12, width * 0.22, width * 0.22];
   if (!thermal) row(["Producto", "Cantidad", "Precio", "Subtotal"], columns, true, size, false, true);
   data.items.forEach((item) => {

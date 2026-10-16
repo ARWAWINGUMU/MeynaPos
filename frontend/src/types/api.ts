@@ -74,6 +74,7 @@ export interface SalePayload {
   items: Array<{ product_id: number; quantity: number }>;
   payment: {
     method: PaymentMethod;
+    method_id?: number | null;
     amount: string;
     reference?: string | null;
   };
@@ -106,6 +107,8 @@ export interface SaleResponse {
   }>;
   payment: {
     method: PaymentMethod;
+    method_id?: number | null;
+    method_name?: string | null;
     amount: string;
     reference?: string | null;
   };
@@ -146,6 +149,7 @@ export interface SalesReportItem {
   discount: string;
   total: string;
   payment_method: string;
+  payment_method_name?: string | null;
   status: string;
 }
 
@@ -166,6 +170,7 @@ export interface TopProductReportItem {
 
 export interface PaymentMethodReportItem {
   method: string;
+  method_name?: string | null;
   transactions: number;
   total: string;
 }

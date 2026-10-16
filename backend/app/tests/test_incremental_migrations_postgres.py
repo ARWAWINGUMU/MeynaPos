@@ -36,6 +36,10 @@ def test_alembic_fresh_and_existing_installations(previous_revision: str | None)
             upgrade(previous_revision)
             metadata = MetaData()
             with engine.begin() as connection:
+                settings = Table("business_settings", metadata, autoload_with=connection)
+                connection.execute(settings.insert().values(business_name="Migration business", tax_id="TEST",
+                    address="Test address", phone="000", email="business@example.test", city="Test city",
+                    currency="COP", tax_percentage=0))
                 customers = Table("customers", metadata, autoload_with=connection)
                 customer_id = connection.execute(customers.insert().values(name="Cliente Predeterminado", document_number="0000000000").returning(customers.c.id)).scalar_one()
                 roles = Table("roles", metadata, autoload_with=connection)
@@ -59,7 +63,7 @@ def test_alembic_fresh_and_existing_installations(previous_revision: str | None)
                 "INITIAL_ADMIN_PASSWORD": f"{uuid4().hex}Aa1!"}, capture_output=True, text=True, timeout=90)
         assert prepared.returncode == 0, prepared.stderr
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0013_catalog_services"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0015_payment_options"
             if customer_id is not None:
                 row = connection.execute(text("SELECT id, name FROM customers WHERE document_number = '0000000000'")).one()
                 assert row == (customer_id, "Cliente final")

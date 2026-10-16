@@ -22,12 +22,14 @@ from app.schemas.open_sale import OpenSaleComplete, OpenSaleCreate, OpenSaleIssu
 from app.schemas.sale import SaleCreate, SaleItemCreate
 from app.services.sale_service import SaleService
 from app.services.setting_service import SettingService
+from app.utils.names import next_sale_name, normalize_name
 
 
 class OpenSaleService:
     def __init__(self, db: Session) -> None:
         self.db = db
-        self.repository = OpenSaleRepository(db)
+        self.business_id = SettingService(db).get_or_create_settings().id
+        self.repository = OpenSaleRepository(db, self.business_id)
         self.products = ProductRepository(db)
         self.sales = SaleService(db)
 
@@ -74,20 +76,28 @@ class OpenSaleService:
             return self._read(existing, settings)
         try:
             with self._transaction():
+                self._lock_names()
+                existing = self.repository.get(identifier)
+                if existing is not None:
+                    if existing.cashier_id != user.id:
+                        raise HTTPException(403, "Open sale identifier belongs to another cashier")
+                    return self._read(existing, settings)
+                name = next_sale_name(self._occupied_names())
                 number = OpenSaleNumber()
                 self.db.add(number)
                 self.db.flush()
                 draft = OpenSale(id=identifier, cashier=user, currency=settings.currency,
-                    tax_percentage=settings.tax_percentage, version=1, number=number.id, name=f"Venta {number.id}")
+                    tax_percentage=settings.tax_percentage, version=1, number=number.id,
+                    business_id=self.business_id, name=name, name_key=normalize_name(name))
                 self.db.add(draft)
                 self._write(draft, payload)
                 self.db.flush()
                 return self._read(draft, settings)
-        except IntegrityError:
+        except IntegrityError as error:
             existing = self.repository.get(identifier)
             if existing is not None and existing.cashier_id == user.id:
                 return self._read(existing, settings)
-            raise
+            raise HTTPException(409, "The open sale identifier or name is unavailable; retry creation") from error
 
     def update(self, identifier: str, payload: OpenSaleUpdate, user: User) -> OpenSaleRead:
         settings = SettingService(self.db).get_or_create_settings()
@@ -101,11 +111,26 @@ class OpenSaleService:
     def rename(self, identifier: str, name: str, version: int, user: User) -> OpenSaleRead:
         settings = SettingService(self.db).get_or_create_settings()
         with self._transaction():
+            self._lock_names()
             draft = self._authorized(identifier, user, lock=True)
             self._editable(draft, version)
+            name = " ".join(name.split())
+            if normalize_name(name) in {normalize_name(value) for value in self._occupied_names(exclude_id=identifier)}:
+                raise HTTPException(409, detail={"code": "NAME_CONFLICT", "message": "Another open sale already uses this name"})
             draft.name = name
+            draft.name_key = normalize_name(name)
             self._touch(draft)
             return self._read(draft, settings)
+
+    def _lock_names(self) -> None:
+        self.db.execute(select(BusinessSetting.id).where(BusinessSetting.id == self.business_id).with_for_update()).scalar_one()
+
+    def _occupied_names(self, exclude_id: str | None = None) -> list[str]:
+        query = select(OpenSale.name).where(OpenSale.business_id == self.business_id,
+            OpenSale.status.in_([OpenSaleStatus.DRAFT, OpenSaleStatus.HELD]))
+        if exclude_id is not None:
+            query = query.where(OpenSale.id != exclude_id)
+        return list(self.db.scalars(query).all())
 
     def cancel(self, identifier: str, version: int, user: User) -> OpenSaleRead:
         settings = SettingService(self.db).get_or_create_settings()

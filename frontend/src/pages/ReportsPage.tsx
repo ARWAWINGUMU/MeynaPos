@@ -94,7 +94,7 @@ export function ReportsPage() {
   const lowStock = useMemo(() => inventory.filter((item) => item.low_stock), [inventory]);
   const totalRevenue = useMemo(() => sales.reduce((sum, item) => sum + Number(item.total), 0), [sales]);
   const topProductsChart = topProducts.map((item) => ({ name: item.name, ingresos: Number(item.total), cantidad: item.quantity_sold }));
-  const paymentsChart = payments.map((item) => ({ name: item.method, value: Number(item.total), transactions: item.transactions }));
+  const paymentsChart = payments.map((item) => ({ name: item.method_name ?? item.method, value: Number(item.total), transactions: item.transactions }));
 
   return (
     <section className="space-y-6 p-8">
@@ -199,7 +199,7 @@ export function ReportsPage() {
                     <td className="px-3 py-3">{sale.cashier}</td>
                     <td className="px-3 py-3">{sale.customer}</td>
                     <td className="px-3 py-3 font-semibold text-[#047857]">{formatMoney(sale.total, currency)}</td>
-                    <td className="px-3 py-3">{sale.payment_method}</td>
+                    <td className="px-3 py-3">{sale.payment_method_name ?? sale.payment_method}</td>
                     <td className="px-3 py-3"><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">{sale.status}</span></td>
                     <td className="px-3 py-3">
                       <button onClick={() => openSaleDetail(sale.sale_id)} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50">
@@ -266,7 +266,7 @@ export function ReportsPage() {
               <p><span className="font-medium">Impuesto:</span> {formatMoney(selectedSale.tax_amount, currency)}</p>
               <p><span className="font-medium">Descuento:</span> {formatMoney(selectedSale.monto_descuento, currency)}</p>
               <p><span className="font-medium">Total:</span> {formatMoney(selectedSale.total, currency)}</p>
-              <p><span className="font-medium">Método:</span> {selectedSale.payment.method}</p>
+              <p><span className="font-medium">Método:</span> {selectedSale.payment.method_name ?? selectedSale.payment.method}</p>
             </div>
             <div className="overflow-x-auto rounded-lg border border-gray-100">
               <table className="w-full text-left text-sm">
